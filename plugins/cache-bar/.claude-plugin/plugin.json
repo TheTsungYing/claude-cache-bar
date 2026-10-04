@@ -1,0 +1,6 @@
+{
+  "name": "cache-bar",
+  "version": "0.1.0",
+  "description": "Shows prompt cache hit rate and TTL status in Claude Code",
+  "types": "./types/index.d.ts"
+}

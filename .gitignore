@@ -1,0 +1,4 @@
+.claude/types/
+plugins/*/.claude/types/
+plugins/*/.claude-plugin/types/
+node_modules/

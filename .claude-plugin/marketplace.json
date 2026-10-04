@@ -1,0 +1,12 @@
+{
+  "name": "claude-cache-bar",
+  "description": "Claude Code mods: prompt cache status display",
+  "owner": { "name": "TODO-github-name" },
+  "plugins": [
+    {
+      "name": "cache-bar",
+      "source": "./plugins/cache-bar",
+      "description": "Shows prompt cache hit rate and TTL status in Claude Code"
+    }
+  ]
+}
