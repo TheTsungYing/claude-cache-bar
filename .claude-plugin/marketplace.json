@@ -1,7 +1,7 @@
 {
   "name": "claude-cache-bar",
   "description": "Claude Code mods: prompt cache status display",
-  "owner": { "name": "TODO-github-name" },
+  "owner": { "name": "TheTsungYing" },
   "plugins": [
     {
       "name": "cache-bar",
