@@ -25,6 +25,40 @@ export type Strings = {
   broke: (causes: string) => string
   ringAlt: string
   sparkAlt: string
+  /** The side panel. */
+  paneTitle: string
+  commandDescription: string
+  /** The band's button that opens the panel. */
+  details: string
+  paneUnplaced: (reason: string) => string
+  /** How the TTL was learned: a hit after `minutes` idle proved it. */
+  ttlLearned: (ttl: Ttl, minutes: number) => string
+  ttlAssumed: string
+  lastHit: string
+  summaryTitle: string
+  averageHit: string
+  extensionsCount: string
+  peakContext: string
+  chartTitle: string
+  chartAlt: string
+  legend: { read: string; written: string; uncached: string; rate: string; broke: string }
+  breaksTitle: string
+  noBreaks: string
+  /** One break: request number, hit rate before and after, tokens rewritten. */
+  breakLine: (n: number | null, before: string, after: string, k: string) => string
+  extensionsTitle: string
+  noExtensions: string
+  trigger: { manual: string; auto: string }
+  extensionRead: (k: string) => string
+  extensionFailed: (reason: string) => string
+  settingsTitle: string
+  onExpiringLabel: string
+  onExpiringOptions: Record<'notify' | 'button' | 'auto', string>
+  ttlModeLabel: string
+  ttlModeOptions: Record<TtlMode, string>
+  settingFailed: (reason: string) => string
+  /** When an extension ran: `clock` idle since the last request. */
+  idleAt: (clock: string) => string
 }
 
 const ttl = (mode: TtlMode, value: Ttl) => (mode === 'auto' ? `auto→${value}` : value)
@@ -58,6 +92,35 @@ export const STRINGS: Record<Language, Strings> = {
     broke: causes => `cache broke: ${causes}`,
     ringAlt: 'cache TTL countdown',
     sparkAlt: 'hit rate per request',
+    paneTitle: 'Prompt cache',
+    commandDescription: 'Open the prompt cache panel',
+    details: 'Details',
+    paneUnplaced: reason => `Couldn't open the cache panel: ${reason}`,
+    ttlLearned: (value, minutes) => `${value} detected: a hit after ${minutes}m idle`,
+    ttlAssumed: '5m assumed until a hit after 5m idle proves 1h',
+    lastHit: 'last hit',
+    summaryTitle: 'This conversation',
+    averageHit: 'avg hit',
+    extensionsCount: 'extended',
+    peakContext: 'peak ctx',
+    chartTitle: 'Per request',
+    chartAlt: 'cache read, write and miss per request, with the hit rate',
+    legend: { read: 'read', written: 'write', uncached: 'miss', rate: 'hit rate', broke: 'break' },
+    breaksTitle: 'Cache breaks',
+    noBreaks: 'none',
+    breakLine: (n, before, after, k) => `${n === null ? '' : `request #${n} · `}${before} → ${after} · rewrote ${k}`,
+    extensionsTitle: 'Extensions',
+    noExtensions: 'none',
+    trigger: { manual: 'manual', auto: 'auto' },
+    extensionRead: k => `read ${k}`,
+    extensionFailed: reason => `failed: ${reason}`,
+    settingsTitle: 'Settings',
+    onExpiringLabel: 'When about to expire',
+    onExpiringOptions: { notify: 'Notify only', button: 'Notify + Extend button', auto: 'Extend automatically' },
+    ttlModeLabel: 'Cache TTL',
+    ttlModeOptions: { auto: 'Auto-detect', '5m': '5 minutes', '1h': '1 hour' },
+    settingFailed: reason => `Couldn't change the setting: ${reason}`,
+    idleAt: clock => `${clock} idle`,
   },
   'zh-TW': {
     waiting: '等待第一次回應',
@@ -87,5 +150,34 @@ export const STRINGS: Record<Language, Strings> = {
     broke: causes => `快取斷掉：${causes}`,
     ringAlt: '快取 TTL 倒數',
     sparkAlt: '每次請求的命中率',
+    paneTitle: 'Prompt 快取',
+    commandDescription: '開啟 prompt 快取面板',
+    details: '詳細',
+    paneUnplaced: reason => `無法開啟快取面板：${reason}`,
+    ttlLearned: (value, minutes) => `判定為 ${value}：閒置 ${minutes} 分鐘後仍命中`,
+    ttlAssumed: '先當 5m，閒置超過 5 分鐘後仍命中才判定為 1h',
+    lastHit: '上次命中',
+    summaryTitle: '本次對話',
+    averageHit: '平均命中',
+    extensionsCount: '延長',
+    peakContext: '最大上下文',
+    chartTitle: '每次請求',
+    chartAlt: '每次請求的快取讀取、寫入、未命中與命中率',
+    legend: { read: '讀取', written: '寫入', uncached: '未命中', rate: '命中率', broke: '斷掉' },
+    breaksTitle: '快取斷掉',
+    noBreaks: '無',
+    breakLine: (n, before, after, k) => `${n === null ? '' : `第 ${n} 次請求 · `}${before} → ${after} · 重寫 ${k}`,
+    extensionsTitle: '延長紀錄',
+    noExtensions: '無',
+    trigger: { manual: '手動', auto: '自動' },
+    extensionRead: k => `讀取 ${k}`,
+    extensionFailed: reason => `失敗：${reason}`,
+    settingsTitle: '設定',
+    onExpiringLabel: '快過期時',
+    onExpiringOptions: { notify: '只通知', button: '通知 + 延長按鈕', auto: '自動延長' },
+    ttlModeLabel: '快取 TTL',
+    ttlModeOptions: { auto: '自動偵測', '5m': '5 分鐘', '1h': '1 小時' },
+    settingFailed: reason => `無法變更設定：${reason}`,
+    idleAt: clock => `閒置 ${clock} 時`,
   },
 }

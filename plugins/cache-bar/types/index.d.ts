@@ -7,6 +7,20 @@ export type Ttl = '5m' | '1h'
 
 export type BreakSensitivity = 'low' | 'medium' | 'high'
 
+export type OnExpiring = 'notify' | 'button' | 'auto'
+
+/**
+ * A setting picked in the panel where `$.config` has no row for it (a plugin
+ * folder on desktop). It stands while the `userConfig` value it replaced,
+ * `over`, is unchanged: a later change in settings wins.
+ */
+export type Override<T> = { value: T; over: T }
+
+export type Overrides = {
+  onExpiring: Override<OnExpiring> | null
+  ttlMode: Override<TtlMode> | null
+}
+
 /** One main-thread model request's prompt cache usage. */
 export type CacheSample = {
   /** When the request was sent, ms since the epoch. The cache refreshes here. */
@@ -111,8 +125,16 @@ declare module 'claude-code' {
        * `section:<name>`, `context:<name>`, `tool:<name>`).
        */
       prints: StateFamily<number[]>
-      /** The clock, written every second so countdowns redraw. */
+      /** The clock, written every second; read by drawings without Svg (the terminal panel). */
       now: number
+      /**
+       * The countdown's stage: `working`, `none`, or `<anchor>|<ttl>|<phase>`.
+       * Written when it changes; the band and panel redraw on it, not on `now`,
+       * since a redraw every second resets an open Select's highlight.
+       */
+      stage: string
+      /** Settings picked in the panel; also kept in `$.store`. */
+      overrides: Overrides
       /** True while a keep-warm fork is in flight. */
       extending: boolean
       /**

@@ -8,6 +8,8 @@ import type {
   ChangeMarks,
   Extension,
   Language,
+  OnExpiring,
+  Overrides,
   SessionSummary,
   Ttl,
   TtlMode,
@@ -30,7 +32,7 @@ const MIN_PROOF_TOKENS = 1024
 
 // ---- Config
 
-export type OnExpiring = 'notify' | 'button' | 'auto'
+export type { OnExpiring }
 
 export type Config = {
   language: Language
@@ -64,6 +66,52 @@ export const readConfig = (options: Readonly<Record<string, unknown>>): Config =
   autoExtendGiveUpMin: clamp(options.autoExtendGiveUpMin, 0, 0, 24 * 60),
   breakSensitivity: pick(options.breakSensitivity, ['low', 'medium', 'high'], 'medium'),
 })
+
+// ---- Settings picked in the panel
+
+export const NO_OVERRIDES: Overrides = { onExpiring: null, ttlMode: null }
+
+const ON_EXPIRING: readonly OnExpiring[] = ['notify', 'button', 'auto']
+const TTL_MODES: readonly TtlMode[] = ['auto', '5m', '1h']
+
+const isOverride = <T extends string>(value: unknown, allowed: readonly T[]) =>
+  value === null ||
+  (typeof value === 'object' &&
+    'value' in value &&
+    'over' in value &&
+    allowed.some(a => a === value.value) &&
+    allowed.some(a => a === value.over))
+
+/** Whether a `$.store` value is a well-formed Overrides. */
+export const isOverrides = (value: unknown): value is Overrides =>
+  typeof value === 'object' &&
+  value !== null &&
+  'onExpiring' in value &&
+  'ttlMode' in value &&
+  isOverride(value.onExpiring, ON_EXPIRING) &&
+  isOverride(value.ttlMode, TTL_MODES)
+
+/** The settings in force: each override while the value it replaced still stands. */
+export const applyOverrides = (base: Config, o: Overrides): Config => ({
+  ...base,
+  onExpiring: o.onExpiring !== null && o.onExpiring.over === base.onExpiring ? o.onExpiring.value : base.onExpiring,
+  ttlMode: o.ttlMode !== null && o.ttlMode.over === base.ttlMode ? o.ttlMode.value : base.ttlMode,
+})
+
+export type QuickSetting = keyof Overrides
+
+/** Records a pick; picking the `userConfig` value again clears the override. */
+export const withOverride = (o: Overrides, base: Config, field: QuickSetting, value: string): Overrides => {
+  if (field === 'onExpiring') {
+    const picked = pick(value, ON_EXPIRING, base.onExpiring)
+
+    return { ...o, onExpiring: picked === base.onExpiring ? null : { value: picked, over: base.onExpiring } }
+  }
+
+  const picked = pick(value, TTL_MODES, base.ttlMode)
+
+  return { ...o, ttlMode: picked === base.ttlMode ? null : { value: picked, over: base.ttlMode } }
+}
 
 // ---- Samples
 
@@ -344,6 +392,19 @@ export const recentHits = (samples: readonly CacheSample[], breaks: readonly Cac
   const broke = new Set(breaks.map(b => b.at))
 
   return samples.slice(-count).map(s => ({ rate: hitRateOf(s), isBreak: broke.has(s.sentAt) }))
+}
+
+/** The last `count` samples as the panel chart's stacked bars. */
+export const chartBars = (samples: readonly CacheSample[], breaks: readonly CacheBreak[], count: number) => {
+  const broke = new Set(breaks.map(b => b.at))
+
+  return samples.slice(-count).map(s => ({
+    read: s.read,
+    written: s.written,
+    uncached: s.uncached,
+    rate: hitRateOf(s),
+    isBreak: broke.has(s.sentAt),
+  }))
 }
 
 // ---- Summary

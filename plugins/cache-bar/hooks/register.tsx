@@ -7,8 +7,11 @@ import {
   KEEP_WARM_PROMPT,
   MAX_EVENTS,
   MAX_SAMPLES,
+  NO_OVERRIDES,
   anchorOf,
   appendCapped,
+  applyOverrides,
+  chartBars,
   contextOf,
   countdownOf,
   effectiveTtl,
@@ -20,26 +23,38 @@ import {
   guessCauses,
   hitRateOf,
   isBreak,
+  isOverrides,
   isTtlState,
   learnTtl,
   notePrint,
   readConfig,
   recentHits,
   shouldAutoExtend,
+  summarize,
   toBreak,
   toExtension,
   toSample,
+  withOverride,
 } from './core'
+import type { QuickSetting } from './core'
 import { STRINGS } from './i18n'
 import {
+  BIG_CLOCK_SIZE,
+  BIG_RING_SIZE,
+  CHART_BARS,
+  CLOCK_SIZE,
+  CHART_HEIGHT,
+  CHART_WIDTH,
   COLORS,
-  IDLE_RING_SVG,
   RING_SIZE,
   SPARK_HEIGHT,
   SPARK_WIDTH,
-  SPINNER_SVG,
+  chartSvg,
+  clockSvg,
+  idleRingSvg,
   ringSvg,
   sparklineSvg,
+  spinnerSvg,
 } from './svg'
 
 const samples = atom({ plugin: 'cache-bar', key: 'samples' } as const, [] as CacheSample[])
@@ -51,17 +66,31 @@ const ttl = atom({ plugin: 'cache-bar', key: 'ttl' } as const, EMPTY_TTL)
 const changedAt = { plugin: 'cache-bar', key: 'changedAt' } as const
 const prints = { plugin: 'cache-bar', key: 'prints' } as const
 const clock = atom({ plugin: 'cache-bar', key: 'now' } as const, 0)
+const stage = atom({ plugin: 'cache-bar', key: 'stage' } as const, 'none')
 const extending = atom({ plugin: 'cache-bar', key: 'extending' } as const, false)
+const overrides = atom({ plugin: 'cache-bar', key: 'overrides' } as const, NO_OVERRIDES)
 const alertedFor = atom({ plugin: 'cache-bar', key: 'alertedFor' } as const, null as number | null)
 
 /** `$.store` key of the learned TTL, kept across sessions. */
 const TTL_STORE_KEY = 'ttl'
 
+/** `$.store` key of the settings picked in the panel. */
+const OVERRIDES_STORE_KEY = 'overrides'
+
 /** Requests the band's trend line spans. */
 const SPARK_POINTS = 24
 
+/** The side panel's id, and the command that opens it. */
+const PANE = 'cache-bar'
+const COMMAND = 'cache'
+
+/** Rows the panel's break and extension lists show, newest first. */
+const LIST_ROWS = 8
+
 export const register: Register = (on, options) => {
-  const config = readConfig(options)
+  // The userConfig values, and those in force once the panel's picks apply.
+  const base = readConfig(options)
+  let config = base
   const strings = STRINGS[config.language]
   let shownStatus: string | undefined
   // Once the desktop band draws, the status line would only repeat it.
@@ -72,15 +101,33 @@ export const register: Register = (on, options) => {
   // since a Button can't reach this plugin's own slash command.
   let extendNow: ((trigger: Extension['trigger']) => Promise<void>) | null = null
   // The ring's drawing stays the same while its anchor, TTL and phase do, so
-  // its SMIL countdown keeps running across the band's per-second redraws.
+  // its SMIL countdown keeps running across the band's redraws.
   let ring = { key: '', source: '' }
+  let smallClock = { key: '', source: '', width: 0, height: 0 }
+  // The panel's ring and clock, kept the same way. Dropped when the panel
+  // opens or closes: a fresh drawing restarts its SMIL from load.
+  let bigRing = { key: '', source: '' }
+  let bigClock = { key: '', source: '', width: 0, height: 0 }
+  const forgetPaneDrawings = () => {
+    bigRing = { key: '', source: '' }
+    bigClock = { key: '', source: '', width: 0, height: 0 }
+  }
 
   on('session.start', async ($, e, next) => {
+    await $.command.register({ name: COMMAND, description: strings.commandDescription })
     const stored = await $.store.get(TTL_STORE_KEY)
 
     if (isTtlState(stored)) {
       await update($, ttl, current => (current.detected === null ? stored : current))
     }
+
+    const storedOverrides = await $.store.get(OVERRIDES_STORE_KEY)
+
+    if (isOverrides(storedOverrides)) {
+      await update($, overrides, () => storedOverrides)
+    }
+
+    config = applyOverrides(base, await read($, overrides))
 
     extendNow = async trigger => {
       if (isForking) {
@@ -138,6 +185,15 @@ export const register: Register = (on, options) => {
       // Expiry notices: none while Claude answers, since each request refreshes.
       const last = view.samples.at(-1)
       const countdown = countdownOf(view.samples, view.extensions, config.ttlMode, view.ttl, config, now)
+      const nextStage = isWorking
+        ? 'working'
+        : countdown === null
+          ? 'none'
+          : `${countdown.anchor}|${countdown.ttl}|${countdown.phase}`
+
+      if ((await read($, stage)) !== nextStage) {
+        await update($, stage, () => nextStage)
+      }
 
       if (isWorking || last === undefined || countdown === null || countdown.phase !== 'alert') {
         return
@@ -162,6 +218,13 @@ export const register: Register = (on, options) => {
     })
 
     return next(e)
+  })
+
+  on('command.run', { command: COMMAND }, async $ => {
+    forgetPaneDrawings()
+    const opened = await $.ui.open({ id: PANE, title: strings.paneTitle })
+
+    return opened.isPlaced ? {} : { text: strings.paneUnplaced(opened.reason) }
   })
 
   on('turn.start', async ($, e, next) => {
@@ -300,18 +363,34 @@ export const register: Register = (on, options) => {
 
     hasBand = true
     const { Box, Text, Button, Svg } = $.ui.resolve(e)
-    // Read so the per-second tick redraws the band; the time itself comes fresh.
-    await read($, clock)
+    // Redraw on the stage, not every second: the ring and the clock count down
+    // by SMIL, and a per-second redraw of the band resets an open Select's
+    // highlight in the panel too.
+    await read($, stage)
+    config = applyOverrides(base, await read($, overrides))
     const now = await $.clock.now()
     const list = await read($, samples)
     const last = list.at(-1)
     const s = strings
+    const details = (
+      <Button
+        key="details"
+        plain
+        dimColor
+        label={s.details}
+        onPress={() => {
+          forgetPaneDrawings()
+          void $.ui.open({ id: PANE, title: s.paneTitle })
+        }}
+      />
+    )
 
     if (last === undefined) {
       return (
         <Box flexDirection="row" alignItems="center" gap={1}>
-          <Svg key="ring" alt={s.ringAlt} source={IDLE_RING_SVG} width={RING_SIZE} height={RING_SIZE} />
+          <Svg key="ring" alt={s.ringAlt} source={idleRingSvg()} width={RING_SIZE} height={RING_SIZE} />
           <Text dimColor>{s.waiting}</Text>
+          {details}
         </Box>
       )
     }
@@ -329,14 +408,18 @@ export const register: Register = (on, options) => {
     const ringKey = isAnswering ? 'working' : `${countdown.anchor}|${countdown.ttl}|${countdown.phase}`
 
     if (ring.key !== ringKey) {
-      ring = { key: ringKey, source: isAnswering ? SPINNER_SVG : ringSvg(countdown) }
+      ring = { key: ringKey, source: isAnswering ? spinnerSvg() : ringSvg(countdown) }
     }
 
     const lastBreak = breakList.at(-1)
     const didBreak = lastBreak !== undefined && lastBreak.at === last.sentAt
     const canExtend = !isAnswering && countdown.phase === 'alert' && config.onExpiring !== 'notify'
     const clockColor =
-      countdown.phase === 'warn' ? COLORS.warn : countdown.phase === 'alert' ? COLORS.alert : undefined
+      countdown.phase === 'warn' ? COLORS.warn : countdown.phase === 'alert' ? COLORS.alert : COLORS.fresh
+
+    if (smallClock.key !== ringKey) {
+      smallClock = { key: ringKey, ...clockSvg(countdown.leftMs, clockColor, CLOCK_SIZE) }
+    }
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
@@ -348,9 +431,13 @@ export const register: Register = (on, options) => {
             {s.expired} · {s.rewriteNext(context)}
           </Text>
         ) : (
-          <Text bold color={clockColor}>
-            {formatClock(countdown.leftMs)}
-          </Text>
+          <Svg
+            key="clock"
+            alt={formatClock(countdown.leftMs)}
+            source={smallClock.source}
+            width={smallClock.width}
+            height={smallClock.height}
+          />
         )}
         <Text dimColor>{s.ttl(config.ttlMode, countdown.ttl)}</Text>
         <Text>
@@ -376,6 +463,296 @@ export const register: Register = (on, options) => {
         ) : canExtend ? (
           <Button key="extend" variant="primary" label={s.extend(context)} onPress={() => void extendNow?.('manual')} />
         ) : null}
+        {details}
+      </Box>
+    )
+  })
+
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE) {
+      forgetPaneDrawings()
+    }
+
+    return next(e)
+  })
+
+  // The side panel: the countdown large, this conversation's totals, the
+  // per-request chart, breaks, extensions and quick settings. Drawings where
+  // the surface has Svg; the terminal gets the text.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const ui = $.ui.resolve(e)
+    const { Box, Text, Button } = ui
+    const Svg = 'Svg' in ui ? ui.Svg : null
+    const Select = 'Select' in ui ? ui.Select : null
+    const s = strings
+    // Redraw on the stage, not every second: the ring and clock count down by
+    // SMIL. Without Svg (the terminal) the clock is text, so it reads `now`.
+    await read($, stage)
+    config = applyOverrides(base, await read($, overrides))
+
+    if (Svg === null) {
+      await read($, clock)
+    }
+
+    const now = await $.clock.now()
+    const list = await read($, samples)
+    const breakList = await read($, breaks)
+    const extensionList = await read($, extensions)
+    const learned = await read($, ttl)
+    const isExtending = await read($, extending)
+    const last = list.at(-1)
+    const countdown = countdownOf(list, extensionList, config.ttlMode, learned, config, now)
+
+    // Through `/config` where it has the row: the module reloads with the new
+    // options. A plugin folder on desktop gets no rows, so the pick is kept as
+    // an override instead, in `$.state` (redrawing) and `$.store`.
+    const setOption = async (field: QuickSetting, value: string) => {
+      if (value === config[field]) {
+        return
+      }
+
+      try {
+        const rows = await $.config.list()
+        const row =
+          rows.find(r => r.key === `cache-bar.${field}`) ??
+          rows.find(r => r.key.startsWith('cache-bar') && r.key.endsWith(`.${field}`))
+
+        if (row === undefined) {
+          await update($, overrides, o => withOverride(o, base, field, value))
+          const picked = await read($, overrides)
+          config = applyOverrides(base, picked)
+          await $.store.set(OVERRIDES_STORE_KEY, picked)
+
+          return
+        }
+
+        const result = await $.config.set({ key: row.key, value })
+
+        if (result.deny !== undefined) {
+          $.ui.toast(s.settingFailed(result.deny))
+        }
+      } catch (err) {
+        $.ui.toast(s.settingFailed(String(err)))
+      }
+    }
+
+    const title = (text: string) => <Text bold>{text}</Text>
+    const stat = (label: string, value: string) => (
+      <Text>
+        <Text dimColor>{label} </Text>
+        {value}
+      </Text>
+    )
+
+    const settings = (
+      <Box flexDirection="column">
+        {title(s.settingsTitle)}
+        {Select === null ? (
+          <Text dimColor>
+            {s.onExpiringLabel}: {s.onExpiringOptions[config.onExpiring]} · {s.ttlModeLabel}:{' '}
+            {s.ttlModeOptions[config.ttlMode]}
+          </Text>
+        ) : (
+          <Box flexDirection="column" gap={1}>
+            <Box flexDirection="column">
+              <Text dimColor>{s.onExpiringLabel}</Text>
+              <Select
+                key="onExpiring"
+                value={config.onExpiring}
+                options={(['notify', 'button', 'auto'] as const).map(v => ({ value: v, label: s.onExpiringOptions[v] }))}
+                onSelect={value => void setOption('onExpiring', value)}
+              />
+            </Box>
+            <Box flexDirection="column">
+              <Text dimColor>{s.ttlModeLabel}</Text>
+              <Select
+                key="ttlMode"
+                value={config.ttlMode}
+                options={(['auto', '5m', '1h'] as const).map(v => ({ value: v, label: s.ttlModeOptions[v] }))}
+                onSelect={value => void setOption('ttlMode', value)}
+              />
+            </Box>
+          </Box>
+        )}
+      </Box>
+    )
+
+    if (last === undefined || countdown === null) {
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Box flexDirection="row" alignItems="center" gap={2}>
+            {Svg === null ? null : (
+              <Svg
+                key="ring"
+                alt={s.ringAlt}
+                source={idleRingSvg(BIG_RING_SIZE)}
+                width={BIG_RING_SIZE}
+                height={BIG_RING_SIZE}
+              />
+            )}
+            <Text dimColor>{s.waiting}</Text>
+          </Box>
+          {settings}
+        </Box>
+      )
+    }
+
+    const context = formatTokens(contextOf(last))
+    const ringKey = isWorking ? 'working' : `${countdown.anchor}|${countdown.ttl}|${countdown.phase}`
+
+    if (bigRing.key !== ringKey) {
+      bigRing = { key: ringKey, source: isWorking ? spinnerSvg(BIG_RING_SIZE) : ringSvg(countdown, BIG_RING_SIZE) }
+    }
+
+    const clockColor =
+      countdown.phase === 'warn' ? COLORS.warn : countdown.phase === 'alert' ? COLORS.alert : undefined
+
+    if (bigClock.key !== ringKey) {
+      bigClock = { key: ringKey, ...clockSvg(countdown.leftMs, clockColor ?? COLORS.fresh, BIG_CLOCK_SIZE) }
+    }
+
+    const canExtend = !isWorking && countdown.phase === 'alert' && config.onExpiring !== 'notify'
+    const ttlNote =
+      config.ttlMode !== 'auto'
+        ? null
+        : learned.detected === '1h' && learned.idleMs !== null
+          ? s.ttlLearned('1h', Math.floor(learned.idleMs / 60_000))
+          : s.ttlAssumed
+    const summary = summarize(list, breakList, extensionList)
+    const shown = list.slice(-CHART_BARS)
+    const peakInput = Math.max(...shown.map(x => x.read + x.written + x.uncached))
+    // The request an extension kept warm: the last one sent before it.
+    const idleSince = (at: number) => [...list].reverse().find(x => x.sentAt < at)?.sentAt ?? null
+    const numberOf = (sentAt: number) => {
+      const i = list.findIndex(x => x.sentAt === sentAt)
+
+      return i < 0 ? null : i + 1
+    }
+    const swatch = (color: string, glyph: string, label: string) => (
+      <Text>
+        <Text color={color}>{glyph}</Text>
+        <Text dimColor> {label}</Text>
+      </Text>
+    )
+
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Box flexDirection="row" alignItems="center" gap={2}>
+          {Svg === null ? null : (
+            <Svg key="ring" alt={s.ringAlt} source={bigRing.source} width={BIG_RING_SIZE} height={BIG_RING_SIZE} />
+          )}
+          <Box flexDirection="column">
+            {isWorking ? (
+              <Text bold color={COLORS.working}>
+                {s.working}
+              </Text>
+            ) : countdown.phase === 'expired' ? (
+              <Text bold color={COLORS.expired}>
+                {s.expired} · {s.rewriteNext(context)}
+              </Text>
+            ) : Svg === null ? (
+              <Text bold color={clockColor}>
+                {formatClock(countdown.leftMs)}
+              </Text>
+            ) : (
+              <Svg
+                key="clock"
+                alt={formatClock(countdown.leftMs)}
+                source={bigClock.source}
+                width={bigClock.width}
+                height={bigClock.height}
+              />
+            )}
+            {stat('TTL', s.ttl(config.ttlMode, countdown.ttl))}
+            {ttlNote === null ? null : <Text dimColor>{ttlNote}</Text>}
+            <Text>
+              {stat(s.lastHit, formatPercent(hitRateOf(last)))} · {stat(s.context, context)}
+            </Text>
+          </Box>
+          {isExtending ? (
+            <Text dimColor>{s.extending}</Text>
+          ) : canExtend ? (
+            <Button
+              key="extend"
+              variant="primary"
+              label={s.extend(context)}
+              onPress={() => void extendNow?.('manual')}
+            />
+          ) : null}
+        </Box>
+
+        <Box flexDirection="column">
+          {title(s.summaryTitle)}
+          <Text>
+            {stat(s.averageHit, summary.averageHitRate === null ? '–' : formatPercent(summary.averageHitRate))} ·{' '}
+            {stat(s.requests, String(summary.requests))} · {stat(s.breaks, String(summary.breaks))} ·{' '}
+            {stat(s.extensionsCount, String(summary.extensions))} ·{' '}
+            {stat(s.peakContext, formatTokens(summary.peakContext))}
+          </Text>
+        </Box>
+
+        {Svg === null ? null : (
+          <Box flexDirection="column">
+            {title(s.chartTitle)}
+            <Svg
+              key="chart"
+              alt={s.chartAlt}
+              source={chartSvg(chartBars(list, breakList, CHART_BARS), formatTokens(peakInput))}
+              width={CHART_WIDTH}
+              height={CHART_HEIGHT}
+            />
+            <Box flexDirection="row" gap={2} flexWrap="wrap">
+              {swatch(COLORS.read, '■', s.legend.read)}
+              {swatch(COLORS.written, '■', s.legend.written)}
+              {swatch(COLORS.uncached, '■', s.legend.uncached)}
+              {swatch(COLORS.rate, '━', s.legend.rate)}
+              {swatch(COLORS.alert, '●', s.legend.broke)}
+            </Box>
+          </Box>
+        )}
+
+        <Box flexDirection="column">
+          {title(s.breaksTitle)}
+          {breakList.length === 0 ? <Text dimColor>{s.noBreaks}</Text> : null}
+          {breakList
+            .slice(-LIST_ROWS)
+            .reverse()
+            .map(b => (
+              <Box flexDirection="column">
+                <Text>
+                  <Text color={COLORS.alert}>● </Text>
+                  {s.breakLine(
+                    numberOf(b.at),
+                    formatPercent(b.previousHitRate),
+                    formatPercent(b.hitRate),
+                    formatTokens(b.rewritten),
+                  )}
+                </Text>
+                <Text dimColor>  {formatCauses(b.causes, s)}</Text>
+              </Box>
+            ))}
+        </Box>
+
+        <Box flexDirection="column">
+          {title(s.extensionsTitle)}
+          {extensionList.length === 0 ? <Text dimColor>{s.noExtensions}</Text> : null}
+          {extensionList
+            .slice(-LIST_ROWS)
+            .reverse()
+            .map(x => (
+              <Text>
+                <Text dimColor>{s.idleAt(formatClock(x.at - (idleSince(x.at) ?? x.at)))} · </Text>
+                {s.trigger[x.trigger]} ·{' '}
+                {x.isAnswered ? (
+                  s.extensionRead(formatTokens(x.read))
+                ) : (
+                  <Text color={COLORS.alert}>{s.extensionFailed(x.reason ?? '')}</Text>
+                )}
+              </Text>
+            ))}
+        </Box>
+
+        {settings}
       </Box>
     )
   })
