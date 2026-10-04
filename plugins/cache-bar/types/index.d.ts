@@ -113,6 +113,13 @@ declare module 'claude-code' {
       prints: StateFamily<number[]>
       /** The clock, written every second so countdowns redraw. */
       now: number
+      /** True while a keep-warm fork is in flight. */
+      extending: boolean
+      /**
+       * The `sentAt` of the request whose idle stretch already got its expiry
+       * notice; null before any. One notice per idle stretch.
+       */
+      alertedFor: number | null
     }
   }
 }

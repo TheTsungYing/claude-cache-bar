@@ -61,7 +61,7 @@ export const readConfig = (options: Readonly<Record<string, unknown>>): Config =
   toast: typeof options.toast === 'boolean' ? options.toast : true,
   autoExtendMaxPerIdle: clamp(options.autoExtendMaxPerIdle, 3, 0, 100),
   autoExtendMinContextK: clamp(options.autoExtendMinContextK, 20, 0, 10_000),
-  autoExtendGiveUpMin: clamp(options.autoExtendGiveUpMin, 30, 1, 24 * 60),
+  autoExtendGiveUpMin: clamp(options.autoExtendGiveUpMin, 0, 0, 24 * 60),
   breakSensitivity: pick(options.breakSensitivity, ['low', 'medium', 'high'], 'medium'),
 })
 
@@ -165,6 +165,107 @@ export const anchorOf = (samples: readonly CacheSample[], extensions: readonly E
 
 export const remainingMs = (anchor: number, ttl: Ttl, now: number) => anchor + TTL_MS[ttl] - now
 
+/** fresh, then warn and alert as the TTL runs low, then expired. */
+export type Phase = 'fresh' | 'warn' | 'alert' | 'expired'
+
+export type Countdown = {
+  anchor: number
+  ttl: Ttl
+  totalMs: number
+  leftMs: number
+  /** How much of the TTL is left at `warnAtPercent` and `alertAtPercent`, ms. */
+  warnMs: number
+  alertMs: number
+  phase: Phase
+}
+
+export const phaseOf = (leftMs: number, warnMs: number, alertMs: number): Phase =>
+  leftMs <= 0 ? 'expired' : leftMs <= alertMs ? 'alert' : leftMs <= warnMs ? 'warn' : 'fresh'
+
+/** Where the countdown stands; null before the first request. */
+export const countdownOf = (
+  samples: readonly CacheSample[],
+  extensions: readonly Extension[],
+  mode: TtlMode,
+  learned: TtlState,
+  config: Pick<Config, 'warnAtPercent' | 'alertAtPercent'>,
+  now: number,
+): Countdown | null => {
+  const anchor = anchorOf(samples, extensions)
+
+  if (anchor === null) {
+    return null
+  }
+
+  const ttl = effectiveTtl(mode, learned)
+  const totalMs = TTL_MS[ttl]
+  const leftMs = remainingMs(anchor, ttl, now)
+  const warnMs = (totalMs * config.warnAtPercent) / 100
+  const alertMs = (totalMs * Math.min(config.alertAtPercent, config.warnAtPercent)) / 100
+
+  return { anchor, ttl, totalMs, leftMs, warnMs, alertMs, phase: phaseOf(leftMs, warnMs, alertMs) }
+}
+
+// ---- Keeping the cache warm
+
+/** The one user message a keep-warm fork sends after the cached prefix. */
+export const KEEP_WARM_PROMPT = 'Reply with the single word: ok'
+
+type ForkUsage = Pick<Usage, 'cache_read_input_tokens' | 'cache_creation_input_tokens'>
+
+/** What `$.model.fork` resolved to, as far as an Extension needs it. */
+export type ForkOutcome =
+  | { isAnswered: true; usage: ForkUsage }
+  | { isAnswered: false; reason: string; usage?: ForkUsage }
+
+/** `at` is when the fork was sent: the cache refreshes there. */
+export const toExtension = (outcome: ForkOutcome, at: number, trigger: Extension['trigger']): Extension => ({
+  at,
+  trigger,
+  isAnswered: outcome.isAnswered,
+  reason: outcome.isAnswered ? null : outcome.reason,
+  read: outcome.usage?.cache_read_input_tokens ?? 0,
+  written: outcome.usage?.cache_creation_input_tokens ?? 0,
+})
+
+/** Extensions tried since the last real request: this idle stretch's. */
+export const extensionsThisIdle = (samples: readonly CacheSample[], extensions: readonly Extension[]) => {
+  const since = samples.at(-1)?.sentAt ?? Number.NEGATIVE_INFINITY
+
+  return extensions.filter(x => x.at > since)
+}
+
+export type AutoExtendCheck = {
+  samples: readonly CacheSample[]
+  extensions: readonly Extension[]
+  countdown: Countdown
+  config: Pick<Config, 'onExpiring' | 'autoExtendMaxPerIdle' | 'autoExtendMinContextK' | 'autoExtendGiveUpMin'>
+  now: number
+}
+
+/**
+ * Whether to extend on its own now: in `auto` mode, once the alert threshold
+ * is reached and before expiry, within the three limits (a give-up time of 0
+ * means none), and at most one try per refresh (a failed fork leaves the
+ * anchor where it was; no retry storm).
+ */
+export const shouldAutoExtend = ({ samples, extensions, countdown, config, now }: AutoExtendCheck) => {
+  const last = samples.at(-1)
+
+  if (config.onExpiring !== 'auto' || last === undefined || countdown.phase !== 'alert') {
+    return false
+  }
+
+  const tried = extensionsThisIdle(samples, extensions)
+
+  return (
+    tried.length < config.autoExtendMaxPerIdle &&
+    contextOf(last) >= config.autoExtendMinContextK * 1000 &&
+    (config.autoExtendGiveUpMin === 0 || now - last.sentAt < config.autoExtendGiveUpMin * MINUTE) &&
+    tried.every(x => x.at <= countdown.anchor)
+  )
+}
+
 // ---- Breaks
 
 export const SENSITIVITY: Record<BreakSensitivity, { minContext: number; below: number; above: number }> = {
@@ -234,6 +335,15 @@ export const notePrint = (seen: readonly number[], text: string): { seen: number
   return seen.includes(hash)
     ? { seen: [...seen], isChange: false }
     : { seen: [...seen, hash].slice(-HASHES_PER_KEY), isChange: true }
+}
+
+// ---- Hit-rate history
+
+/** The last `count` samples' hit rates, each with whether it broke the cache. */
+export const recentHits = (samples: readonly CacheSample[], breaks: readonly CacheBreak[], count: number) => {
+  const broke = new Set(breaks.map(b => b.at))
+
+  return samples.slice(-count).map(s => ({ rate: hitRateOf(s), isBreak: broke.has(s.sentAt) }))
 }
 
 // ---- Summary

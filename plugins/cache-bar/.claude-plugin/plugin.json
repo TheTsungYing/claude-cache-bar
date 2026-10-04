@@ -67,9 +67,9 @@
     "autoExtendGiveUpMin": {
       "type": "number",
       "title": "Auto-extend: give up after (minutes idle)",
-      "description": "Stop extending once you have been away this long",
-      "default": 30,
-      "min": 1,
+      "description": "Stop extending once you have been away this long; 0 means no time limit",
+      "default": 0,
+      "min": 0,
       "max": 1440
     },
     "breakSensitivity": {
