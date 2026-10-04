@@ -2,5 +2,82 @@
   "name": "cache-bar",
   "version": "0.1.0",
   "description": "Shows prompt cache hit rate and TTL status in Claude Code",
-  "types": "./types/index.d.ts"
+  "author": { "name": "TsungYing", "url": "https://github.com/TheTsungYing" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "Display language: en or zh-TW",
+      "default": "en",
+      "options": ["en", "zh-TW"]
+    },
+    "ttlMode": {
+      "type": "string",
+      "title": "Cache TTL",
+      "description": "auto infers 5m or 1h from what the cache does; 5m or 1h fixes it",
+      "default": "auto",
+      "options": ["auto", "5m", "1h"]
+    },
+    "onExpiring": {
+      "type": "string",
+      "title": "When the cache is about to expire",
+      "description": "notify: notify only; button: notify and offer an extend button; auto: extend automatically",
+      "default": "button",
+      "options": ["notify", "button", "auto"]
+    },
+    "warnAtPercent": {
+      "type": "number",
+      "title": "Warn at % left",
+      "description": "The bar turns yellow and blinks when this much of the TTL is left",
+      "default": 20,
+      "min": 1,
+      "max": 99
+    },
+    "alertAtPercent": {
+      "type": "number",
+      "title": "Alert at % left",
+      "description": "Notify (and offer to extend) when this much of the TTL is left",
+      "default": 10,
+      "min": 1,
+      "max": 99
+    },
+    "toast": {
+      "type": "boolean",
+      "title": "Toast notifications",
+      "description": "Show a toast when the cache is about to expire",
+      "default": true
+    },
+    "autoExtendMaxPerIdle": {
+      "type": "number",
+      "title": "Auto-extend: max per idle stretch",
+      "description": "How many times to extend automatically while you are away",
+      "default": 3,
+      "min": 0,
+      "max": 100
+    },
+    "autoExtendMinContextK": {
+      "type": "number",
+      "title": "Auto-extend: minimum context (k tokens)",
+      "description": "Don't extend a cache smaller than this; rewriting it is cheap",
+      "default": 20,
+      "min": 0,
+      "max": 10000
+    },
+    "autoExtendGiveUpMin": {
+      "type": "number",
+      "title": "Auto-extend: give up after (minutes idle)",
+      "description": "Stop extending once you have been away this long",
+      "default": 30,
+      "min": 1,
+      "max": 1440
+    },
+    "breakSensitivity": {
+      "type": "string",
+      "title": "Cache break sensitivity",
+      "description": "How readily a drop in hit rate counts as a cache break: low, medium or high",
+      "default": "medium",
+      "options": ["low", "medium", "high"]
+    }
+  }
 }

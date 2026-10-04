@@ -28,6 +28,7 @@ plugins/cache-bar/
 
 - Never pass `$` into your own helper functions; `claude plugin validate` rejects it. Write every `$.noun.method()` call inside a hook or a closure in one. Keep shared logic in pure functions over plain data.
 - Redraw through `$.state`: write a value with `update($, atom, fn)` that the render hook `read`s. `$.ui.invalidate('ui.render')` called from a `$.clock.every` timer did not redraw the band.
+- Hooks that fire in bursts (`tool.describe` runs once per tool, all at once) must not `update` one shared value: every retry loses to another writer and `update` throws after its bound. Key such data by a `StateFamily` member per id, or write with a plain `$.state.set`.
 - `$.command.run` skips the calling plugin's own `command.run` hooks. A Button must run its action in `onPress`, not by running the plugin's own slash command.
 - Desktop draws `Svg` (and `Box`, `Text`, `Button`, `Input`, `Select`, `Link`, `Code`, `Markdown`, `Client`), but not `Raster` or `Image`. SMIL animation works in plain image mode. `isInteractive` adds a white frame, so avoid it.
 - `$.ui.toast` shows bottom right on desktop, and toast and status lines are already titled with the plugin name, so don't prefix the text.
