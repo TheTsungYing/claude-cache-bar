@@ -21,6 +21,7 @@ plugins/cache-bar/
 
 - Load the `plugin-authoring` skill before writing hooks code. Its `types/claude-code.d.ts` is the API reference for the running build.
 - Validate after every change: `claude plugin validate plugins/cache-bar`.
+- Test: `claude plugin test plugins/cache-bar` runs `plugins/cache-bar/tests/*.test.ts`. Pure logic lives in `hooks/core.ts` so tests call it directly.
 - Preview live: point `CLAUDE_CODE_PLUGIN_DIRS` at `plugins/cache-bar` and set `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` (in the `env` block of `~/.claude/settings.json`), then open a new desktop session. Saved edits reload the module.
 - Commit messages follow Conventional Commits (`type(scope): summary`). Don't add `Co-Authored-By` or other attribution trailers.
 
@@ -35,3 +36,5 @@ plugins/cache-bar/
 - `$.audio.play` reports success on Windows but makes no sound, and `$.audio.speak` fails ("no speech synthesizer on windows"). Don't rely on audio.
 - `$.model.fork({ prompt })` re-sends the main thread's last request. It reads the cached prefix (write 0), keeps its own tail out of the cache, and doesn't appear in the transcript. This is the keep-warm mechanism.
 - The API doesn't expose the cache TTL (5m or 1h). Infer it: a cache hit after more than 5 minutes idle means 1h.
+- In `claude plugin test`, a test's hooks stand for the engine: every `$` call the plugin makes needs one (`session.start`, `command.register`, `ui.status`, ...). Hooks for `$` methods answer `{ value }` (or `{ deny }`); event hooks answer the event's result. `mock.clock` drives `$.clock.every`.
+- `claude plugin validate` reports a matcher built from an imported constant as `?`; it still matches at run time.

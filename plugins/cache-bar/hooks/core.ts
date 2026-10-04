@@ -450,38 +450,52 @@ export const formatClock = (ms: number) => {
 export const formatCauses = (causes: readonly BreakCause[], s: Strings) =>
   causes.length === 0 ? s.unknownCause : causes.map(c => s.causes[c]).join(', ')
 
+/** The slash command that keeps the cache warm, without its slash. */
+export const EXTEND_COMMAND = 'cache-extend'
+
 export type StatusView = {
   samples: readonly CacheSample[]
   breaks: readonly CacheBreak[]
   extensions: readonly Extension[]
   ttl: TtlState
-  mode: TtlMode
+  config: Pick<Config, 'ttlMode' | 'onExpiring' | 'warnAtPercent' | 'alertAtPercent'>
+  isWorking: boolean
+  isExtending: boolean
   now: number
 }
 
-/** The one-line status (temporary until the desktop band lands). */
+/**
+ * The one-line status for the terminal and VS Code: `⚡ 3:42 · 94% · 48.2k`,
+ * and `⚠ 0:28 /cache-extend` once the cache is about to expire.
+ */
 export const formatStatus = (v: StatusView, s: Strings) => {
   const last = v.samples.at(-1)
-  const anchor = anchorOf(v.samples, v.extensions)
+  const countdown = countdownOf(v.samples, v.extensions, v.config.ttlMode, v.ttl, v.config, v.now)
 
-  if (last === undefined || anchor === null) {
-    return s.waiting
+  if (last === undefined || countdown === null) {
+    return `⚡ ${s.waiting}`
   }
 
-  const ttl = effectiveTtl(v.mode, v.ttl)
-  const left = remainingMs(anchor, ttl, v.now)
-  const parts = [
-    left > 0 ? `⚡ ${formatClock(left)}` : `⚠ ${s.expired}`,
-    s.ttl(v.mode, ttl),
-    `${s.hit} ${formatPercent(hitRateOf(last))}`,
-    `${s.context} ${formatTokens(contextOf(last))}`,
-    `${s.requests} ${v.samples.length}`,
-  ]
+  const context = formatTokens(contextOf(last))
+  const tail = [formatPercent(hitRateOf(last)), context]
   const lastBreak = v.breaks.at(-1)
 
-  if (lastBreak !== undefined) {
-    parts.push(`${s.breaks} ${v.breaks.length} (${formatCauses(lastBreak.causes, s)})`)
+  if (lastBreak !== undefined && lastBreak.at === last.sentAt) {
+    tail.push(`⚠ ${s.broke(formatCauses(lastBreak.causes, s))}`)
   }
 
-  return parts.join(' · ')
+  const clock = formatClock(countdown.leftMs)
+  const head = v.isExtending
+    ? `⚡ ${s.extending}`
+    : v.isWorking
+      ? `⚡ ${s.working}`
+      : countdown.phase === 'expired'
+        ? `⚠ ${s.expired} · ${s.rewriteNext(context)}`
+        : countdown.phase === 'alert' && v.config.onExpiring !== 'notify'
+          ? `⚠ ${clock} /${EXTEND_COMMAND}`
+          : countdown.phase === 'fresh'
+            ? `⚡ ${clock}`
+            : `⚠ ${clock}`
+
+  return [head, ...tail].join(' · ')
 }

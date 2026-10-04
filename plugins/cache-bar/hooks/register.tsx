@@ -4,6 +4,7 @@ import type { Register } from 'claude-code'
 import type { CacheBreak, CacheSample, Extension } from '../types'
 import {
   EMPTY_TTL,
+  EXTEND_COMMAND,
   KEEP_WARM_PROMPT,
   MAX_EVENTS,
   MAX_SAMPLES,
@@ -97,9 +98,11 @@ export const register: Register = (on, options) => {
   let hasBand = false
   let isWorking = false
   let isForking = false
-  // Set by session.start: one keep-warm fork. The band's button calls it too,
-  // since a Button can't reach this plugin's own slash command.
-  let extendNow: ((trigger: Extension['trigger']) => Promise<void>) | null = null
+  // Set by session.start: one keep-warm fork, resolving to what it reports
+  // (null when one is already running), toasted unless `shouldToast` is false.
+  // The buttons call it too, since a Button can't reach this plugin's own
+  // slash command.
+  let extendNow: ((trigger: Extension['trigger'], shouldToast?: boolean) => Promise<string | null>) | null = null
   // The ring's drawing stays the same while its anchor, TTL and phase do, so
   // its SMIL countdown keeps running across the band's redraws.
   let ring = { key: '', source: '' }
@@ -115,6 +118,7 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: COMMAND, description: strings.commandDescription })
+    await $.command.register({ name: EXTEND_COMMAND, description: strings.extendCommandDescription })
     const stored = await $.store.get(TTL_STORE_KEY)
 
     if (isTtlState(stored)) {
@@ -129,9 +133,9 @@ export const register: Register = (on, options) => {
 
     config = applyOverrides(base, await read($, overrides))
 
-    extendNow = async trigger => {
+    extendNow = async (trigger, shouldToast = true) => {
       if (isForking) {
-        return
+        return null
       }
 
       isForking = true
@@ -143,19 +147,29 @@ export const register: Register = (on, options) => {
         const extension = toExtension(outcome, sentAt, trigger)
         await update($, extensions, list => appendCapped(list, extension, MAX_EVENTS))
         const readK = formatTokens(extension.read)
+        const text = !outcome.isAnswered
+          ? strings.extendFailed(outcome.reason)
+          : trigger === 'manual'
+            ? strings.extended(readK)
+            : strings.autoExtended(readK)
 
-        if (!outcome.isAnswered) {
-          $.ui.toast(strings.extendFailed(outcome.reason))
-        } else if (trigger === 'manual') {
-          $.ui.toast(strings.extended(readK))
-        } else if (config.toast) {
-          $.ui.toast(strings.autoExtended(readK))
+        // A quiet auto extension stays quiet; a failure is always told.
+        if (shouldToast && (trigger === 'manual' || config.toast || !outcome.isAnswered)) {
+          $.ui.toast(text)
         }
+
+        return text
       } catch (err) {
         const reason = String(err)
         const extension = toExtension({ isAnswered: false, reason }, sentAt, trigger)
         await update($, extensions, list => appendCapped(list, extension, MAX_EVENTS))
-        $.ui.toast(strings.extendFailed(reason))
+        const text = strings.extendFailed(reason)
+
+        if (shouldToast) {
+          $.ui.toast(text)
+        }
+
+        return text
       } finally {
         isForking = false
         await update($, extending, () => false)
@@ -172,9 +186,12 @@ export const register: Register = (on, options) => {
         breaks: await read($, breaks),
         extensions: await read($, extensions),
         ttl: await read($, ttl),
-        mode: config.ttlMode,
+        config,
+        isWorking,
+        isExtending: isForking,
         now,
       }
+      // The terminal and VS Code have no band: the status line is their display.
       const text = hasBand ? undefined : formatStatus(view, strings)
 
       if (text !== shownStatus) {
@@ -213,7 +230,8 @@ export const register: Register = (on, options) => {
 
       if (config.toast) {
         const notice = strings.expiresIn(formatClock(countdown.leftMs))
-        $.ui.toast(config.onExpiring === 'notify' ? notice : `${notice} · ${strings.pressExtend}`)
+        const hint = hasBand ? strings.pressExtend : strings.runExtend(EXTEND_COMMAND)
+        $.ui.toast(config.onExpiring === 'notify' ? notice : `${notice} · ${hint}`)
       }
     })
 
@@ -225,6 +243,22 @@ export const register: Register = (on, options) => {
     const opened = await $.ui.open({ id: PANE, title: strings.paneTitle })
 
     return opened.isPlaced ? {} : { text: strings.paneUnplaced(opened.reason) }
+  })
+
+  // Keeps the cache warm now, whatever the countdown says: the TTL is only an
+  // estimate. The answer is the command's output line rather than a toast.
+  on('command.run', { command: EXTEND_COMMAND }, async $ => {
+    if ((await read($, samples)).length === 0) {
+      return { text: strings.extendNothing }
+    }
+
+    if (isWorking) {
+      return { text: strings.extendBusy }
+    }
+
+    const text = await extendNow?.('manual', false)
+
+    return { text: text ?? strings.extendAlready }
   })
 
   on('turn.start', async ($, e, next) => {

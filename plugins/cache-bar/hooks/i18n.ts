@@ -18,6 +18,8 @@ export type Strings = {
   rewriteNext: (k: string) => string
   expiresIn: (clock: string) => string
   pressExtend: string
+  /** The same hint where there is no band to press: run the command. */
+  runExtend: (command: string) => string
   extended: (k: string) => string
   autoExtended: (k: string) => string
   extendFailed: (reason: string) => string
@@ -28,6 +30,11 @@ export type Strings = {
   /** The side panel. */
   paneTitle: string
   commandDescription: string
+  extendCommandDescription: string
+  /** `/cache-extend` with nothing to do. */
+  extendNothing: string
+  extendBusy: string
+  extendAlready: string
   /** The band's button that opens the panel. */
   details: string
   paneUnplaced: (reason: string) => string
@@ -86,6 +93,7 @@ export const STRINGS: Record<Language, Strings> = {
     rewriteNext: k => `next request rewrites ${k}`,
     expiresIn: clock => `Prompt cache expires in ${clock}`,
     pressExtend: 'press Extend on the bar to keep it',
+    runExtend: command => `run /${command} to keep it`,
     extended: k => `Cache extended (read ${k})`,
     autoExtended: k => `Cache extended automatically (read ${k})`,
     extendFailed: reason => `Couldn't extend the cache: ${reason}`,
@@ -94,6 +102,10 @@ export const STRINGS: Record<Language, Strings> = {
     sparkAlt: 'hit rate per request',
     paneTitle: 'Prompt cache',
     commandDescription: 'Open the prompt cache panel',
+    extendCommandDescription: 'Keep the prompt cache warm now',
+    extendNothing: 'Nothing is cached yet: no request has been sent',
+    extendBusy: 'Claude is answering: each request refreshes the cache',
+    extendAlready: 'Already extending the cache',
     details: 'Details',
     paneUnplaced: reason => `Couldn't open the cache panel: ${reason}`,
     ttlLearned: (value, minutes) => `${value} detected: a hit after ${minutes}m idle`,
@@ -144,6 +156,7 @@ export const STRINGS: Record<Language, Strings> = {
     rewriteNext: k => `下次請求將重寫 ${k}`,
     expiresIn: clock => `快取將在 ${clock} 後過期`,
     pressExtend: '按橫條上的「延長」可保留',
+    runExtend: command => `輸入 /${command} 可保留`,
     extended: k => `已延長快取（讀取 ${k}）`,
     autoExtended: k => `已自動延長快取（讀取 ${k}）`,
     extendFailed: reason => `無法延長快取：${reason}`,
@@ -152,6 +165,10 @@ export const STRINGS: Record<Language, Strings> = {
     sparkAlt: '每次請求的命中率',
     paneTitle: 'Prompt 快取',
     commandDescription: '開啟 prompt 快取面板',
+    extendCommandDescription: '立即延長 prompt 快取',
+    extendNothing: '還沒有送出請求，沒有可延長的快取',
+    extendBusy: '回覆中：每次請求都會讓快取重新計時',
+    extendAlready: '正在延長快取',
     details: '詳細',
     paneUnplaced: reason => `無法開啟快取面板：${reason}`,
     ttlLearned: (value, minutes) => `判定為 ${value}：閒置 ${minutes} 分鐘後仍命中`,
