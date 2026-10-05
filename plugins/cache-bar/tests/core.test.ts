@@ -5,10 +5,15 @@ import {
   EMPTY_TTL,
   NO_OVERRIDES,
   applyOverrides,
+  chartModel,
+  chartScale,
+  costOf,
   countdownOf,
   formatClock,
+  formatGap,
   formatStatus,
   guessCauses,
+  hitLevelOf,
   isBreak,
   learnTtl,
   normalizeOverrides,
@@ -16,6 +21,7 @@ import {
   notePrint,
   readConfig,
   shouldAutoExtend,
+  ttlWhenSent,
   withOverride,
 } from '../hooks/core'
 import type { Config, StatusView } from '../hooks/core'
@@ -413,5 +419,88 @@ describe('prompt fingerprints', () => {
     const c = notePrint(b.seen, 'main')
 
     expect([a.isChange, b.isChange, c.isChange]).toEqual([true, true, false])
+  })
+})
+
+describe('panel chart', () => {
+  const first = sample(T0, 0, 50_000)
+
+  test('a request bills writes at the TTL known when it was sent', () => {
+    const later = after(first, 10 * MINUTE, 50_000, 1_000)
+
+    expect(ttlWhenSent(later, '5m', ONE_HOUR)).toBe('5m')
+    expect(ttlWhenSent(first, 'auto', EMPTY_TTL)).toBe(null)
+    expect(ttlWhenSent(sample(T0 - MINUTE, 0, 50_000), 'auto', ONE_HOUR)).toBe(null)
+    expect(ttlWhenSent(later, 'auto', ONE_HOUR)).toBe('1h')
+  })
+
+  test('cost weighs reads at 0.1 and writes at 1.25 or 2', () => {
+    const s = sample(T0, 100_000, 1_000)
+
+    expect(costOf(s, '5m')).toEqual({ read: 10_000, written: 1_250, uncached: 10 })
+    expect(costOf(s, '1h')).toEqual({ read: 10_000, written: 2_000, uncached: 10 })
+    expect(costOf(s, null)).toEqual(costOf(s, '5m'))
+  })
+
+  test('the scale caps below the bars that dwarf the 90th percentile, and only then', () => {
+    const everyday = Array.from({ length: 19 }, (_, i) => 1_000 + i * 100)
+
+    expect(chartScale([1_000, 50_000])).toEqual({ top: 50_000, isCapped: false })
+    expect(chartScale([...everyday, 60_000])).toEqual({ top: 2_800, isCapped: true })
+    expect(chartScale([...everyday, 5_000])).toEqual({ top: 5_000, isCapped: false })
+    expect(chartScale(Array.from({ length: 12 }, () => 0))).toEqual({ top: 0, isCapped: false })
+  })
+
+  test('the strip colours only a slipped or broken hit rate', () => {
+    expect(hitLevelOf(first, false)).toBe('ok')
+    expect(hitLevelOf(after(first, MINUTE, 97_000, 2_990), false)).toBe('ok')
+    expect(hitLevelOf(after(first, MINUTE, 90_000, 9_990), false)).toBe('dip')
+    expect(hitLevelOf(after(first, MINUTE, 50_000, 49_990), false)).toBe('low')
+    expect(hitLevelOf(after(first, MINUTE, 97_000, 2_990), true)).toBe('broke')
+  })
+
+  test('bars carry their number, idle gaps and the keep-warm forks between them', () => {
+    const list = [first]
+
+    for (let i = 1; i < 6; i++) {
+      list.push(after(list[i - 1]!, i === 3 ? 12 * MINUTE : MINUTE, 50_000, 500))
+    }
+
+    const third = list[2]!
+    const extensions = [
+      extension(third.sentAt + 4 * MINUTE),
+      extension(third.sentAt + 5 * MINUTE, { isAnswered: false, reason: 'busy', read: 0 }),
+      extension(list[5]!.sentAt + MINUTE),
+    ]
+    const model = chartModel(list, [], extensions, 'auto', EMPTY_TTL, 4)
+
+    expect(model.bars.map(b => b.number)).toEqual([3, 4, 5, 6])
+    expect(model.bars.map(b => b.gapMs)).toEqual([null, 12 * MINUTE, null, null])
+    expect(model.bars.map(b => b.extensionsBefore)).toEqual([0, 1, 0, 0])
+    expect(model.extensionsAfter).toBe(1)
+    expect(model.bars.map(b => b.isLatest)).toEqual([false, false, false, true])
+    expect(model.bars.every(b => !b.isTtlKnown)).toBe(true)
+  })
+
+  test('a clipped bar fills the plot and says so', () => {
+    // Warm from the start: a cold first write would be a second tall bar.
+    const list = [sample(T0, 50_000, 500)]
+
+    for (let i = 1; i < 12; i++) {
+      list.push(after(list[i - 1]!, MINUTE, 50_000, 500))
+    }
+
+    const broke = after(list.at(-1)!, MINUTE, 0, 50_500)
+    const model = chartModel([...list, broke], [], [], '5m', EMPTY_TTL, 40)
+    const last = model.bars.at(-1)!
+
+    expect(model.isCapped).toBe(true)
+    expect([last.height, last.isClipped, last.isTtlKnown]).toEqual([1, true, true])
+    expect(model.bars.filter(b => b.isClipped)).toHaveLength(1)
+  })
+
+  test('idle gaps read in minutes, then hours', () => {
+    expect(formatGap(12 * MINUTE + 30 * SECOND)).toBe('12m')
+    expect(formatGap(65 * MINUTE)).toBe('1h05')
   })
 })

@@ -2,7 +2,8 @@
 // plain (image) Svg: the countdown runs on its own, so a drawing only has to
 // change when the anchor, the TTL or the phase does.
 
-import type { Phase } from './core'
+import { formatGap } from './core'
+import type { ChartModel, HitLevel, Phase } from './core'
 
 // Claude's palette: a warm neutral while all is well, colour only when
 // something needs you. Mid tones, since a drawing can't follow the theme.
@@ -17,7 +18,8 @@ export const COLORS = {
   read: '#8F8B8380',
   written: '#D97757',
   uncached: '#8F8B8333',
-  rate: '#8F8B83',
+  // A hit rate that slipped but didn't break: between grey and the accent.
+  dip: '#E0B04A',
   label: '#8F8B83',
 } as const
 
@@ -121,72 +123,100 @@ export const sparklineSvg = (points: readonly { rate: number; isBreak: boolean }
   return svg(SPARK_WIDTH, SPARK_HEIGHT, baseline + line + dots)
 }
 
-export const CHART_WIDTH = 320
-export const CHART_HEIGHT = 120
+/** The chart's markup size; the panel scales it to its width. */
+export const CHART_WIDTH = 520
+export const CHART_HEIGHT = 130
 
 /** Bars the chart draws at most: the latest requests. */
 export const CHART_BARS = 40
 
-export type ChartBar = {
-  read: number
-  written: number
-  uncached: number
-  /** Hit rate, 0..1. */
-  rate: number
-  isBreak: boolean
+/** The hit-rate strip's colours: grey while all is well. */
+const LEVEL_COLORS: Record<HitLevel, string> = {
+  ok: COLORS.track,
+  dip: COLORS.dip,
+  low: COLORS.warn,
+  broke: COLORS.alert,
 }
 
-/**
- * One bar per request, stacked read / written / uncached and scaled to the
- * largest input shown; the hit-rate line over them on its own 0..100% scale,
- * and a red dot on it where the cache broke.
- */
-export const chartSvg = (bars: readonly ChartBar[], maxLabel: string) => {
-  const top = 12
-  const bottom = CHART_HEIGHT - 2
-  const left = 2
-  const right = CHART_WIDTH - 2
-  const plot = bottom - top
-  const slot = (right - left) / Math.max(bars.length, 12)
-  const barWidth = Math.max(1, slot * 0.5)
-  const max = Math.max(1, ...bars.map(b => b.read + b.written + b.uncached))
-  const y = (tokens: number) => (tokens / max) * plot
+const escapeXml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-  const rects = bars
+const label = (x: number, y: number, text: string, anchor: 'start' | 'end' = 'start') =>
+  `<text x="${n(x)}" y="${y}" font-family="sans-serif" font-size="10" fill="${COLORS.label}" text-anchor="${anchor}">${escapeXml(text)}</text>`
+
+/**
+ * One bar per request: its cost in uncached-token equivalents, stacked read /
+ * written / uncached. A strip above colours each request's hit rate; a dashed
+ * line and its length mark idle past 5 minutes, ▲ a keep-warm fork. A bar past
+ * a capped scale's top ends in a chevron. `topLabel` and `rangeLabel` head it.
+ */
+export const chartSvg = (model: ChartModel, topLabel: string, rangeLabel: string) => {
+  const left = 4
+  const right = CHART_WIDTH - 4
+  const stripY = 15
+  const top = 27
+  const bottom = 114
+  const marksY = 126
+  const plot = bottom - top
+  const slot = (right - left) / Math.max(model.bars.length, 12)
+  const barWidth = Math.max(1, slot * 0.55)
+  // Marks below the axis skip a label that would run into the one before.
+  let labelEnd = Number.NEGATIVE_INFINITY
+
+  const mark = (x: number, gapMs: number | null, extensions: number, isEnd = false) => {
+    const line =
+      gapMs === null
+        ? ''
+        : `<line x1="${n(x)}" y1="${top - 2}" x2="${n(x)}" y2="${bottom}" stroke="${COLORS.label}" stroke-width="1" stroke-dasharray="2 3"/>`
+    const text = [gapMs === null ? '' : formatGap(gapMs), extensions === 0 ? '' : '▲'.repeat(Math.min(extensions, 3))]
+      .filter(t => t !== '')
+      .join(' ')
+
+    if (text === '' || x < labelEnd) {
+      return line
+    }
+
+    labelEnd = x + text.length * 6 + 4
+
+    return line + (isEnd ? label(right, marksY, text, 'end') : label(x + 1, marksY, text))
+  }
+
+  const bars = model.bars
     .map((b, i) => {
-      const x = n(left + i * slot + (slot - barWidth) / 2)
+      const x = left + i * slot
+      const barX = n(x + (slot - barWidth) / 2)
+      const total = b.cost.read + b.cost.written + b.cost.uncached
+      // Clipped bars keep their mix: each part shrinks with the whole.
+      const scale = total === 0 ? 0 : (b.height * plot) / total
       let base = bottom
-      const part = (tokens: number, color: string) => {
-        const height = y(tokens)
+      const part = (amount: number, color: string) => {
+        const height = amount * scale
         base -= height
 
-        return height <= 0 ? '' : `<rect x="${x}" y="${n(base)}" width="${n(barWidth)}" height="${n(height)}" fill="${color}"/>`
+        return height <= 0
+          ? ''
+          : `<rect x="${barX}" y="${n(base)}" width="${n(barWidth)}" height="${n(height)}" fill="${color}"/>`
       }
+      const middle = n(x + slot / 2)
+      const chevron = b.isClipped
+        ? `<path d="M${n(middle - 3)} ${top - 2}L${middle} ${top - 5}L${n(middle + 3)} ${top - 2}" fill="none" stroke="${COLORS.neutral}" stroke-width="1.2"/>`
+        : ''
 
-      return part(b.read, COLORS.read) + part(b.written, COLORS.written) + part(b.uncached, COLORS.uncached)
+      return (
+        mark(x, b.gapMs, b.extensionsBefore) +
+        `<rect x="${n(x + 0.5)}" y="${stripY}" width="${n(slot - 1)}" height="4" fill="${LEVEL_COLORS[b.level]}"/>` +
+        part(b.cost.read, b.isLatest ? COLORS.neutral : COLORS.read) +
+        part(b.cost.written, COLORS.written) +
+        part(b.cost.uncached, COLORS.uncached) +
+        chevron
+      )
     })
     .join('')
 
-  const points = bars.map((b, i) => ({ x: n(left + i * slot + slot / 2), y: n(bottom - b.rate * plot), b }))
-  const line =
-    points.length > 1
-      ? `<polyline points="${points.map(q => `${q.x},${q.y}`).join(' ')}" fill="none" stroke="${COLORS.rate}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`
-      : ''
-  const dots = points
-    .map(q =>
-      q.b.isBreak
-        ? `<circle cx="${q.x}" cy="${q.y}" r="3.5" fill="${COLORS.alert}"/>`
-        : `<circle cx="${q.x}" cy="${q.y}" r="1.5" fill="${COLORS.rate}"/>`,
-    )
-    .join('')
-  const grid =
-    `<line x1="${left}" y1="${top}" x2="${right}" y2="${top}" stroke="${COLORS.track}" stroke-width="1" stroke-dasharray="2 3"/>` +
-    `<line x1="${left}" y1="${bottom}" x2="${right}" y2="${bottom}" stroke="${COLORS.track}" stroke-width="1"/>`
-  const labels =
-    `<text x="${left}" y="9" font-family="sans-serif" font-size="9" fill="${COLORS.label}">${maxLabel}</text>` +
-    `<text x="${right}" y="9" font-family="sans-serif" font-size="9" fill="${COLORS.rate}" text-anchor="end">100%</text>`
+  const trailing = mark(left + model.bars.length * slot, null, model.extensionsAfter, true)
+  const axis = `<line x1="${left}" y1="${bottom}" x2="${right}" y2="${bottom}" stroke="${COLORS.track}" stroke-width="1"/>`
+  const heads = label(left, 10, topLabel) + label(right, 10, rangeLabel, 'end')
 
-  return svg(CHART_WIDTH, CHART_HEIGHT, grid + rects + line + dots + labels)
+  return svg(CHART_WIDTH, CHART_HEIGHT, axis + bars + trailing + heads)
 }
 
 /** Font sizes of the band's clock and the panel's. */

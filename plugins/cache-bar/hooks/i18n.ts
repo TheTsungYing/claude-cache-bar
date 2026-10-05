@@ -54,7 +54,17 @@ export type Strings = {
   peakContext: string
   chartTitle: string
   chartAlt: string
-  legend: { read: string; written: string; uncached: string; rate: string; broke: string }
+  /** The requests the chart shows, by number: first and last. */
+  chartRange: (first: number, last: number) => string
+  legend: {
+    read: string
+    written: string
+    uncached: string
+    rate: string
+    broke: string
+    gap: string
+    extension: string
+  }
   breaksTitle: string
   noBreaks: string
   /** One break: request number, hit rate before and after, tokens rewritten. */
@@ -136,9 +146,18 @@ export const STRINGS: Record<Language, Strings> = {
     averageHit: 'avg hit',
     extensionsCount: 'extended',
     peakContext: 'peak ctx',
-    chartTitle: 'Per request',
-    chartAlt: 'cache read, write and miss per request, with the hit rate',
-    legend: { read: 'read', written: 'write', uncached: 'miss', rate: 'hit rate', broke: 'break' },
+    chartTitle: 'Per request · token cost',
+    chartAlt: 'cost of each request in uncached-token equivalents, with its hit rate and idle gaps',
+    chartRange: (first, last) => `#${first}–${last}`,
+    legend: {
+      read: 'read ×0.1',
+      written: 'write',
+      uncached: 'miss',
+      rate: 'hit rate',
+      broke: 'break',
+      gap: 'idle >5m',
+      extension: 'extended',
+    },
     breaksTitle: 'Cache breaks',
     noBreaks: 'none',
     breakLine: (n, before, after, k) => `${n === null ? '' : `request #${n} · `}${before} → ${after} · rewrote ${k}`,
@@ -208,9 +227,18 @@ export const STRINGS: Record<Language, Strings> = {
     averageHit: '平均命中',
     extensionsCount: '延長',
     peakContext: '最大上下文',
-    chartTitle: '每次請求',
-    chartAlt: '每次請求的快取讀取、寫入、未命中與命中率',
-    legend: { read: '讀取', written: '寫入', uncached: '未命中', rate: '命中率', broke: '失效' },
+    chartTitle: '每次請求 · 等效 token',
+    chartAlt: '每次請求的等效成本（以未命中 token 計），含命中率與閒置',
+    chartRange: (first, last) => `第 ${first}–${last} 次`,
+    legend: {
+      read: '讀取 ×0.1',
+      written: '寫入',
+      uncached: '未命中',
+      rate: '命中率',
+      broke: '失效',
+      gap: '閒置 >5m',
+      extension: '延長',
+    },
     breaksTitle: '快取失效',
     noBreaks: '無',
     breakLine: (n, before, after, k) => `${n === null ? '' : `第 ${n} 次請求 · `}${before} → ${after} · 重寫 ${k}`,

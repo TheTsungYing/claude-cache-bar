@@ -13,7 +13,7 @@ import {
   anchorOf,
   appendCapped,
   applyOverrides,
-  chartBars,
+  chartModel,
   contextOf,
   countdownOf,
   effectiveTtl,
@@ -46,8 +46,6 @@ import {
   BIG_RING_SIZE,
   CHART_BARS,
   CLOCK_SIZE,
-  CHART_HEIGHT,
-  CHART_WIDTH,
   COLORS,
   RING_SIZE,
   SPARK_HEIGHT,
@@ -750,8 +748,8 @@ export const register: Register = (on, options) => {
 
     const canExtend = !isWorking && countdown.phase === 'alert' && config.onExpiring !== 'notify'
     const summary = summarize(list, breakList, extensionList)
-    const shown = list.slice(-CHART_BARS)
-    const peakInput = Math.max(...shown.map(x => x.read + x.written + x.uncached))
+    const chart = chartModel(list, breakList, extensionList, config.ttlMode, learned, CHART_BARS)
+    const chartFirst = chart.bars[0]?.number ?? 0
     // The request an extension kept warm: the last one sent before it.
     const idleSince = (at: number) => [...list].reverse().find(x => x.sentAt < at)?.sentAt ?? null
     const numberOf = (sentAt: number) => {
@@ -825,17 +823,26 @@ export const register: Register = (on, options) => {
             <Svg
               key="chart"
               alt={s.chartAlt}
-              source={chartSvg(chartBars(list, breakList, CHART_BARS), formatTokens(peakInput))}
-              width={CHART_WIDTH}
-              height={CHART_HEIGHT}
+              source={chartSvg(
+                chart,
+                `${chart.isCapped ? '≤ ' : ''}${formatTokens(Math.round(chart.top))}`,
+                s.chartRange(chartFirst, chartFirst + chart.bars.length - 1),
+              )}
             />
             <Box flexDirection="row" gap={2} flexWrap="wrap">
               {/* Opaque swatches: the bars' see-through greys vanish as text. */}
               {swatch(COLORS.neutral, '■', s.legend.read)}
               {swatch(COLORS.written, '■', s.legend.written)}
               {swatch(COLORS.neutral, '□', s.legend.uncached)}
-              {swatch(COLORS.rate, '━', s.legend.rate)}
-              {swatch(COLORS.alert, '●', s.legend.broke)}
+              <Text>
+                <Text color={COLORS.neutral}>▬</Text>
+                <Text color={COLORS.dip}>▬</Text>
+                <Text color={COLORS.warn}>▬</Text>
+                <Text dimColor> {s.legend.rate}</Text>
+              </Text>
+              {swatch(COLORS.alert, '▬', s.legend.broke)}
+              {swatch(COLORS.neutral, '┊', s.legend.gap)}
+              {swatch(COLORS.neutral, '▲', s.legend.extension)}
             </Box>
           </Box>
         )}

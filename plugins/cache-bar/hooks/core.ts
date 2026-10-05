@@ -471,17 +471,153 @@ export const recentHits = (samples: readonly CacheSample[], breaks: readonly Cac
   return samples.slice(-count).map(s => ({ rate: hitRateOf(s), isBreak: broke.has(s.sentAt) }))
 }
 
-/** The last `count` samples as the panel chart's stacked bars. */
-export const chartBars = (samples: readonly CacheSample[], breaks: readonly CacheBreak[], count: number) => {
-  const broke = new Set(breaks.map(b => b.at))
+// ---- The panel chart
 
-  return samples.slice(-count).map(s => ({
-    read: s.read,
-    written: s.written,
-    uncached: s.uncached,
-    rate: hitRateOf(s),
-    isBreak: broke.has(s.sentAt),
-  }))
+/** What an input token costs against an uncached one: cache writes by TTL. */
+export const COST_WEIGHTS = { read: 0.1, written: { '5m': 1.25, '1h': 2 } } as const
+
+/** Idle past this gets a mark on the chart: a 5m cache is gone by then. */
+export const GAP_MARK_MS = TTL_MS['5m']
+
+/** Fewer bars than this are too few for a percentile: the scale tops at the largest. */
+const CAP_MIN_BARS = 10
+
+/** The scale tops at the 90th percentile only when the largest bar is this many times it. */
+const CAP_RATIO = 3
+
+/**
+ * The TTL a request was written under, as known when it was sent: the mode
+ * set, or under auto what had been proved by then; null while nothing had.
+ * A later proof leaves earlier requests as they were.
+ */
+export const ttlWhenSent = (s: CacheSample, mode: TtlMode, learned: TtlState): Ttl | null =>
+  mode !== 'auto'
+    ? mode
+    : learned.detected !== null && learned.at !== null && learned.at <= s.sentAt
+      ? learned.detected
+      : null
+
+export type Cost = { read: number; written: number; uncached: number }
+
+/** A request's input in uncached-token equivalents; an unknown TTL bills writes as 5m. */
+export const costOf = (s: CacheSample, ttl: Ttl | null): Cost => ({
+  read: s.read * COST_WEIGHTS.read,
+  written: s.written * COST_WEIGHTS.written[ttl ?? '5m'],
+  uncached: s.uncached,
+})
+
+export const totalOf = (c: Cost) => c.read + c.written + c.uncached
+
+/**
+ * Where the chart's scale tops out. Normally at the largest bar; when some
+ * dwarf the 90th percentile (a break rewrites the whole prefix), at the
+ * largest of the rest, so the everyday bars stay readable and only those
+ * clip. Not at the percentile itself: context grows, so the latest bars are
+ * the tallest everyday ones, and they would clip every time.
+ */
+export const chartScale = (totals: readonly number[]): { top: number; isCapped: boolean } => {
+  const max = Math.max(0, ...totals)
+
+  if (totals.length < CAP_MIN_BARS) {
+    return { top: max, isCapped: false }
+  }
+
+  const sorted = [...totals].sort((a, b) => a - b)
+  const p90 = sorted[Math.ceil(sorted.length * 0.9) - 1] ?? 0
+  const limit = p90 * CAP_RATIO
+
+  return p90 > 0 && max > limit
+    ? { top: Math.max(...sorted.filter(t => t <= limit)), isCapped: true }
+    : { top: max, isCapped: false }
+}
+
+/** The hit-rate strip's colour class: only what needs a look gets a colour. */
+export type HitLevel = 'ok' | 'dip' | 'low' | 'broke'
+
+/** The first request has nothing cached to hit, so it reads as ok. */
+export const hitLevelOf = (s: CacheSample, isBreak: boolean): HitLevel => {
+  if (isBreak) {
+    return 'broke'
+  }
+
+  if (s.idleMs === null) {
+    return 'ok'
+  }
+
+  const rate = hitRateOf(s)
+
+  return rate >= 0.95 ? 'ok' : rate >= 0.8 ? 'dip' : 'low'
+}
+
+export type ChartBar = {
+  /** The request's number in this session, from 1. */
+  number: number
+  cost: Cost
+  /** Bar height over the scale's top, 0..1. */
+  height: number
+  isClipped: boolean
+  level: HitLevel
+  isLatest: boolean
+  /** Whether the write weight came from a known TTL. */
+  isTtlKnown: boolean
+  /** The idle before this request when past GAP_MARK_MS, ms; null otherwise. */
+  gapMs: number | null
+  /** Answered keep-warm forks since the request before this one. */
+  extensionsBefore: number
+}
+
+export type ChartModel = {
+  bars: ChartBar[]
+  /** The scale's top, in uncached-token equivalents. */
+  top: number
+  isCapped: boolean
+  /** Answered keep-warm forks after the latest request. */
+  extensionsAfter: number
+}
+
+/** The last `count` requests as the panel chart draws them. */
+export const chartModel = (
+  samples: readonly CacheSample[],
+  breaks: readonly CacheBreak[],
+  extensions: readonly Extension[],
+  mode: TtlMode,
+  learned: TtlState,
+  count: number,
+): ChartModel => {
+  const broke = new Set(breaks.map(b => b.at))
+  const kept = extensions.filter(x => x.isAnswered && x.read > 0)
+  const start = Math.max(0, samples.length - count)
+  const shown = samples.slice(start)
+  const ttls = shown.map(s => ttlWhenSent(s, mode, learned))
+  const costs = shown.map((s, i) => costOf(s, ttls[i] ?? null))
+  const { top, isCapped } = chartScale(costs.map(totalOf))
+
+  const bars = shown.map((s, i): ChartBar => {
+    const cost = costs[i]!
+    const total = totalOf(cost)
+    const previous = samples[start + i - 1]
+
+    return {
+      number: start + i + 1,
+      cost,
+      height: top === 0 ? 0 : Math.min(1, total / top),
+      isClipped: total > top,
+      level: hitLevelOf(s, broke.has(s.sentAt)),
+      isLatest: i === shown.length - 1,
+      isTtlKnown: ttls[i] !== null,
+      gapMs: s.idleMs !== null && s.idleMs > GAP_MARK_MS ? s.idleMs : null,
+      extensionsBefore:
+        previous === undefined ? 0 : kept.filter(x => x.at > previous.sentAt && x.at <= s.sentAt).length,
+    }
+  })
+  const latest = shown.at(-1)
+
+  return {
+    bars,
+    top,
+    isCapped,
+    extensionsAfter: latest === undefined ? 0 : kept.filter(x => x.at > latest.sentAt).length,
+  }
 }
 
 // ---- Summary
@@ -516,6 +652,13 @@ export const summarize = (
 export const formatTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 export const formatPercent = (rate: number) => `${Math.round(rate * 100)}%`
+
+/** An idle gap as the chart labels it: `12m`, or `1h05` past the hour. */
+export const formatGap = (ms: number) => {
+  const minutes = Math.floor(ms / 60_000)
+
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, '0')}`
+}
 
 /** m:ss, minutes unbounded (a 1h TTL reads 59:12). */
 export const formatClock = (ms: number) => {
