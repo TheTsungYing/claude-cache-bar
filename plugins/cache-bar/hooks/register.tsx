@@ -762,6 +762,7 @@ export const register: Register = (on, options) => {
       config.ttlMode,
       learned,
       isNarrow ? NARROW_CHART_BARS : CHART_BARS,
+      config.warnAtPercent,
     )
     const chartFirst = chart.bars[0]?.number ?? 0
     const chartMarks = legendMarks(chart)

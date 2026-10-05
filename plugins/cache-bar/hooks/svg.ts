@@ -166,7 +166,7 @@ const CHART_STYLE =
 /**
  * One bar per request: its cost in uncached-token equivalents, stacked read /
  * written / uncached. A strip above colours each request's hit rate; a dashed
- * line and its length mark idle past 5 minutes, ▲ a keep-warm fork. A bar past
+ * line and its length mark idle that neared expiry, ▲ a keep-warm fork. A bar past
  * a capped scale's top ends in a chevron. `topLabel` and `rangeLabel` head it;
  * below it, the latest request's `readouts` lines, or the hovered one's.
  *

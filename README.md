@@ -31,7 +31,7 @@ Needs Claude Code 2.1.286 or later (function-hook plugins, an early-access API).
 
 - The countdown, with the TTL, last hit rate and context on one line.
 - This conversation: average hit rate, requests, breaks, extensions, peak context.
-- A per-request chart of what each request cost, in uncached-token equivalents (reads ×0.1, writes ×1.25 or ×2 by TTL): writes in orange, a hit-rate strip that only lights up on a dip or a break, and marks for idle gaps over 5 minutes and keep-warm extensions. A break that dwarfs the rest is clipped so everyday bars stay readable. Hover a bar to read its numbers below the chart; otherwise it shows the latest request.
+- A per-request chart of what each request cost, in uncached-token equivalents (reads ×0.1, writes ×1.25 or ×2 by TTL): writes in orange, a hit-rate strip that only lights up on a dip or a break, and marks for idle gaps that came near expiry (from the point where the countdown turns orange, so 48 minutes on a 1-hour TTL) and keep-warm extensions. A break that dwarfs the rest is clipped so everyday bars stay readable. Hover a bar to read its numbers below the chart; otherwise it shows the latest request.
 - The list of cache breaks with their likely causes, and the extensions made; one line when there are none.
 - Quick settings for what happens near expiry, the TTL mode (with how it was detected), the band and the language.
 

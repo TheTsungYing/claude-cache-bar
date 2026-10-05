@@ -476,8 +476,14 @@ export const recentHits = (samples: readonly CacheSample[], breaks: readonly Cac
 /** What an input token costs against an uncached one: cache writes by TTL. */
 export const COST_WEIGHTS = { read: 0.1, written: { '5m': 1.25, '1h': 2 } } as const
 
-/** Idle past this gets a mark on the chart: a 5m cache is gone by then. */
-export const GAP_MARK_MS = TTL_MS['5m']
+/**
+ * How long an idle stretch may run before the chart marks it: until the
+ * countdown would have turned to warn, `warnAtPercent` of the TTL left. The
+ * TTL is the one known when the request was sent; unknown, 5m, as the
+ * countdown assumes.
+ */
+export const gapMarkMs = (ttl: Ttl | null, warnAtPercent: number) =>
+  TTL_MS[ttl ?? '5m'] * (1 - warnAtPercent / 100)
 
 /** Fewer bars than this are too few for a percentile: the scale tops at the largest. */
 const CAP_MIN_BARS = 10
@@ -561,7 +567,7 @@ export type ChartBar = {
   isLatest: boolean
   /** Whether the write weight came from a known TTL. */
   isTtlKnown: boolean
-  /** The idle before this request when past GAP_MARK_MS, ms; null otherwise. */
+  /** The idle before this request when it reached the warn point (gapMarkMs), ms; null otherwise. */
   gapMs: number | null
   /** Answered keep-warm forks since the request before this one. */
   extensionsBefore: number
@@ -588,6 +594,7 @@ export const chartModel = (
   mode: TtlMode,
   learned: TtlState,
   count: number,
+  warnAtPercent: number,
 ): ChartModel => {
   const brokeAt = new Map(breaks.map(b => [b.at, b]))
   const kept = extensions.filter(x => x.isAnswered && x.read > 0)
@@ -611,7 +618,7 @@ export const chartModel = (
       level: hitLevelOf(s, brokeAt.has(s.sentAt)),
       isLatest: i === shown.length - 1,
       isTtlKnown: ttls[i] !== null,
-      gapMs: s.idleMs !== null && s.idleMs > GAP_MARK_MS ? s.idleMs : null,
+      gapMs: s.idleMs !== null && s.idleMs >= gapMarkMs(ttls[i] ?? null, warnAtPercent) ? s.idleMs : null,
       extensionsBefore:
         previous === undefined ? 0 : kept.filter(x => x.at > previous.sentAt && x.at <= s.sentAt).length,
       broke: brokeAt.get(s.sentAt) ?? null,

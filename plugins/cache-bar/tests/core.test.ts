@@ -12,6 +12,7 @@ import {
   formatClock,
   formatGap,
   formatTimeOfDay,
+  gapMarkMs,
   formatStatus,
   guessCauses,
   hitLevelOf,
@@ -476,16 +477,18 @@ describe('panel chart', () => {
       extension(third.sentAt + 5 * MINUTE, { isAnswered: false, reason: 'busy', read: 0 }),
       extension(list[5]!.sentAt + MINUTE),
     ]
-    const model = chartModel(list, [], extensions, 'auto', EMPTY_TTL, 4)
+    const model = chartModel(list, [], extensions, 'auto', EMPTY_TTL, 4, 20)
 
     expect(model.bars.map(b => b.number)).toEqual([3, 4, 5, 6])
     expect(model.bars.map(b => b.gapMs)).toEqual([null, 12 * MINUTE, null, null])
+    // Under a known 1h TTL, 12 minutes is nowhere near expiry; 48 is the warn point.
+    expect(chartModel(list, [], extensions, '1h', EMPTY_TTL, 4, 20).bars.map(b => b.gapMs)).toEqual([null, null, null, null])
     expect(model.bars.map(b => b.extensionsBefore)).toEqual([0, 1, 0, 0])
     expect(model.extensionsAfter).toBe(1)
     expect(model.bars.map(b => b.isLatest)).toEqual([false, false, false, true])
     expect(model.bars.every(b => !b.isTtlKnown)).toBe(true)
     expect(legendMarks(model)).toEqual({ dip: false, low: false, broke: false, gap: true, extension: true })
-    expect(legendMarks(chartModel(list.slice(0, 3), [], [], 'auto', EMPTY_TTL, 40))).toEqual({
+    expect(legendMarks(chartModel(list.slice(0, 3), [], [], 'auto', EMPTY_TTL, 40, 20))).toEqual({
       dip: false,
       low: false,
       broke: false,
@@ -503,7 +506,7 @@ describe('panel chart', () => {
     }
 
     const broke = after(list.at(-1)!, MINUTE, 0, 50_500)
-    const model = chartModel([...list, broke], [], [], '5m', EMPTY_TTL, 40)
+    const model = chartModel([...list, broke], [], [], '5m', EMPTY_TTL, 40, 20)
     const last = model.bars.at(-1)!
 
     expect(model.isCapped).toBe(true)
@@ -516,7 +519,7 @@ describe('panel chart', () => {
     const previous = sample(sentAt - 130 * SECOND, 140_000, 1_000)
     const s = after(previous, 130 * SECOND, 147_200, 1_800, { uncached: 3 })
     const extensions = [extension(sentAt - MINUTE)]
-    const model = chartModel([previous, s], [], extensions, '5m', EMPTY_TTL, 40)
+    const model = chartModel([previous, s], [], extensions, '5m', EMPTY_TTL, 40, 20)
 
     expect(readoutOf(model.bars[1]!, STRINGS['zh-TW'])).toEqual([
       '#2 · 14:32:05 · 閒置 2:10 · 延長 ×1',
@@ -533,14 +536,14 @@ describe('panel chart', () => {
     const s = sample(T0, 147_200, 1_800, { uncached: 3 })
     const broke = after(s, 2 * MINUTE, 0, 148_000, { model: 'claude-haiku-4-5-20251001' })
     const cause = { at: broke.sentAt, hitRate: 0, previousHitRate: 0.99, rewritten: 148_000, causes: ['model' as const] }
-    const model = chartModel([s, broke], [cause], [], 'auto', EMPTY_TTL, 40)
+    const model = chartModel([s, broke], [cause], [], 'auto', EMPTY_TTL, 40, 20)
     const en = STRINGS.en
 
     expect(readoutOf(model.bars[0]!, en)[1]).toMatch(/^cost ≈17\.0k · /)
     expect(readoutOf(model.bars[1]!, en)[0]).toMatch(/ · idle 2:00 · → haiku-4-5$/)
     expect(readoutOf(model.bars[1]!, en)[1]).toBe(`break · rewrote 148.0k · likely: ${en.causes.model}`)
     expect(readoutOf(model.bars[1]!, en, true).slice(1)).toEqual(['break · rewrote 148.0k', `likely: ${en.causes.model}`])
-    expect(readoutOf(chartModel([s, after(s, 65 * MINUTE, 100_000)], [], [], 'auto', EMPTY_TTL, 40).bars[1]!, en)[0]).toMatch(
+    expect(readoutOf(chartModel([s, after(s, 65 * MINUTE, 100_000)], [], [], 'auto', EMPTY_TTL, 40, 20).bars[1]!, en)[0]).toMatch(
       / · idle 1h05$/,
     )
   })
@@ -549,6 +552,12 @@ describe('panel chart', () => {
     expect(shortModel('claude-opus-5-5')).toBe('opus-5-5')
     expect(shortModel('claude-haiku-4-5-20251001')).toBe('haiku-4-5')
     expect(formatTimeOfDay(new Date(2026, 0, 2, 3, 4, 5).getTime())).toBe('03:04:05')
+  })
+
+  test('an idle gap is marked from the warn point of the TTL it ran under', () => {
+    expect(gapMarkMs('5m', 20)).toBe(4 * MINUTE)
+    expect(gapMarkMs('1h', 20)).toBe(48 * MINUTE)
+    expect(gapMarkMs(null, 20)).toBe(4 * MINUTE)
   })
 
   test('idle gaps read in minutes, then hours', () => {
