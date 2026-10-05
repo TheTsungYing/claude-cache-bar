@@ -39,7 +39,7 @@ Needs Claude Code 2.1.286 or later (function-hook plugins, an early-access API).
 - This conversation: average hit rate, requests, breaks, extensions, peak context.
 - A per-request chart of what each request cost, in uncached-token equivalents (reads ×0.1, writes ×1.25 or ×2 by TTL): writes in orange, a hit-rate strip that only lights up on a dip or a break, and marks for idle gaps that came near expiry (from the point where the countdown turns orange, so 48 minutes on a 1-hour TTL) and keep-warm extensions. A break that dwarfs the rest is clipped so everyday bars stay readable. Hover a bar to read its numbers below the chart; otherwise it shows the latest request.
 - The list of cache breaks with their likely causes, and the extensions made; one line when there are none.
-- Quick settings for what happens near expiry, the TTL mode (with how it was detected), the band and the language.
+- Quick settings for what happens near expiry (and, when extending automatically, how many times), toasts, the TTL mode (with how it was detected), the band and the language. Break sensitivity sits under the cache-breaks list, where a misjudged break shows.
 
 **Terminal and VS Code**: one status line.
 
@@ -84,7 +84,7 @@ Likely causes: idle past the TTL, a model switch, a compaction, a change to the 
 
 ## Settings
 
-Each one is a row in `/config`. The side panel's quick settings change `onExpiring`, `ttlMode`, `band` and `language` too, and so does `/cache lang`.
+Each one is a row in `/config`. The side panel's quick settings change `onExpiring`, `autoExtendMaxPerIdle`, `toast`, `ttlMode`, `band`, `breakSensitivity` and `language` too, and `/cache lang` changes the language.
 
 | Setting | Values | Default | |
 |---|---|---|---|

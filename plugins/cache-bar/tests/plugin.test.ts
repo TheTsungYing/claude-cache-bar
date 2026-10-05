@@ -29,8 +29,10 @@ const world = (on: On) => {
   const clock = mock.clock(on, { now: T0 })
   const status: (string | undefined)[] = []
   const forks: string[] = []
-  // A test sets this to give the plugin its /config row for the language.
-  const settings = { language: null as string | null }
+  // A test sets a field here to give the plugin its /config row for it.
+  const settings: Record<string, string | number | boolean | null> = { language: null }
+  // What the plugin asked `$.config.set` for, as it asked.
+  const sets: { key: string; value: unknown }[] = []
   mock.store(on)
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
   on('command.register', async ($, e) => ({ value: { command: e.name } }))
@@ -43,23 +45,24 @@ const world = (on: On) => {
   on('ui.panes', async () => ({ value: [] }))
   // A plugin folder: no settings rows, so picks are kept as overrides.
   on('config.list', async () => ({
-    value:
-      settings.language === null
+    value: Object.entries(settings).flatMap(([field, value]) =>
+      value === null
         ? []
         : [
             {
-              key: 'cache-bar.language',
-              label: 'Language',
-              kind: 'choice' as const,
-              value: settings.language,
-              options: ['en', 'zh-TW'],
+              key: `cache-bar.${field}`,
+              label: field,
+              kind: ROW_KINDS[field] ?? ('choice' as const),
+              value,
               provider: { plugin: 'cache-bar' } as never,
               isLocked: false,
             },
           ],
+    ),
   }))
   on('config.set', async ($, e) => {
-    settings.language = String(e.value)
+    sets.push({ key: e.key, value: e.value })
+    settings[e.key.replace('cache-bar.', '')] = e.value as string | number | boolean
 
     return { value: e.value }
   })
@@ -73,7 +76,30 @@ const world = (on: On) => {
     return { turnId: e.turnId, index: e.index, answer: 'hi', toolUses: [], stopReason: 'end_turn', usage: USAGE }
   })
 
-  return { clock, status, forks, settings }
+  return { clock, status, forks, settings, sets }
+}
+
+const ROW_KINDS: Record<string, 'boolean' | 'choice' | 'number'> = {
+  language: 'choice',
+  breakSensitivity: 'choice',
+  toast: 'boolean',
+  autoExtendMaxPerIdle: 'number',
+}
+
+/** The side panel, as desktop asks the plugin to draw it. */
+const PANE = {
+  plugin: 'cache-bar',
+  surface: 'desktop' as const,
+  component: 'Pane' as const,
+  requestId: 'cache-bar',
+  props: {
+    title: 'Cache',
+    isFocused: true,
+    bodyColumns: 60,
+    placement: 'dock' as const,
+    scroll: { offset: 0, bodyRows: 80 },
+    view: {},
+  },
 }
 
 test('the terminal status line counts down, then points at /cache-extend', { options: { ttlMode: '5m' } }, async ($, on) => {
@@ -154,4 +180,46 @@ test('/cache lang wins over a pick saved before the settings row existed', async
 
   expect((await $.command.run(cache('lang en'))).text).toBe('Language: English')
   expect((await $.command.run(EXTEND)).text).toBe('Nothing is cached yet: no request has been sent')
+})
+
+test('the panel picks break sensitivity, toasts and the auto-extend limit', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(PANE)
+  const valueOf = async (key: string) => (await ui.find({ key }))?.props.value
+
+  expect(await valueOf('breakSensitivity')).toBe('medium')
+  await ui.select({ key: 'breakSensitivity', value: 'high' })
+  expect(await valueOf('breakSensitivity')).toBe('high')
+
+  await ui.select({ key: 'toast', value: 'false' })
+  expect(await valueOf('toast')).toBe('false')
+
+  // The limit only shows once extension is automatic.
+  expect(await ui.find({ key: 'autoExtendMaxPerIdle' })).toBe(undefined)
+  await ui.select({ key: 'onExpiring', value: 'auto' })
+  expect(await valueOf('autoExtendMaxPerIdle')).toBe('3')
+  await ui.select({ key: 'autoExtendMaxPerIdle', value: '10' })
+  expect(await valueOf('autoExtendMaxPerIdle')).toBe('10')
+
+  await ui.unmount()
+})
+
+test('a settings row gets a toggle as a boolean and a limit as a number', async ($, on) => {
+  const { settings, sets } = world(on)
+  settings.toast = true
+  settings.autoExtendMaxPerIdle = 3
+  await $.session.start({ cwd: '.', surface: 'desktop', isInteractive: true })
+  const ui = await $.ui.mount(PANE)
+
+  await ui.select({ key: 'toast', value: 'false' })
+  await ui.select({ key: 'onExpiring', value: 'auto' })
+  await ui.select({ key: 'autoExtendMaxPerIdle', value: '5' })
+
+  expect(sets).toEqual([
+    { key: 'cache-bar.toast', value: false },
+    { key: 'cache-bar.autoExtendMaxPerIdle', value: 5 },
+  ])
+
+  await ui.unmount()
 })

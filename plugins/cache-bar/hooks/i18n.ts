@@ -1,4 +1,4 @@
-import type { BandMode, BreakCause, Language, Ttl, TtlMode } from '../types'
+import type { BandMode, BreakCause, BreakSensitivity, Language, Ttl, TtlMode } from '../types'
 
 export type Strings = {
   waiting: string
@@ -97,6 +97,15 @@ export type Strings = {
   bandLabel: string
   bandOptions: Record<BandMode, string>
   languageLabel: string
+  breakSensitivityLabel: string
+  breakSensitivityOptions: Record<BreakSensitivity, string>
+  /** Under the sensitivity Select: what it changes, and from when. */
+  breakSensitivityNote: string
+  toastLabel: string
+  toastOptions: { on: string; off: string }
+  autoExtendMaxLabel: string
+  /** An auto-extend limit as the Select lists it. */
+  autoExtendTimes: (n: number) => string
   /** `/cache lang` done: `name` is the language's own name. */
   languageSet: (name: string) => string
   /** `/cache` with arguments it doesn't know. */
@@ -200,6 +209,13 @@ export const STRINGS: Record<Language, Strings> = {
     bandLabel: 'Band above the prompt',
     bandOptions: { compact: 'Compact', off: 'Off' },
     languageLabel: 'Language',
+    breakSensitivityLabel: 'Break sensitivity',
+    breakSensitivityOptions: { low: 'Low', medium: 'Medium', high: 'High' },
+    breakSensitivityNote: 'Higher counts smaller drops as breaks; applies from the next request',
+    toastLabel: 'Toast notifications',
+    toastOptions: { on: 'On', off: 'Off' },
+    autoExtendMaxLabel: 'Auto-extend per idle stretch',
+    autoExtendTimes: n => (n === 0 ? 'Never' : n === 1 ? 'Once' : `Up to ${n} times`),
     languageSet: name => `Language: ${name}`,
     cacheUsage: command => `/${command} opens the panel · /${command} lang en|zh-TW switches the language`,
     settingFailed: reason => `Couldn't change the setting: ${reason}`,
@@ -293,6 +309,13 @@ export const STRINGS: Record<Language, Strings> = {
     bandLabel: '輸入框上方橫條',
     bandOptions: { compact: '精簡', off: '關閉' },
     languageLabel: '語言',
+    breakSensitivityLabel: '失效判定靈敏度',
+    breakSensitivityOptions: { low: '低', medium: '中', high: '高' },
+    breakSensitivityNote: '越高越容易判定為失效，從下一次請求起生效',
+    toastLabel: '跳出通知',
+    toastOptions: { on: '開', off: '關' },
+    autoExtendMaxLabel: '每段閒置自動延長',
+    autoExtendTimes: n => (n === 0 ? '不延長' : `最多 ${n} 次`),
     languageSet: name => `語言：${name}`,
     cacheUsage: command => `/${command} 開啟面板 · /${command} lang en|zh-TW 切換語言`,
     settingFailed: reason => `無法變更設定：${reason}`,

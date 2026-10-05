@@ -5,6 +5,7 @@ import {
   EMPTY_TTL,
   NO_OVERRIDES,
   applyOverrides,
+  autoExtendSteps,
   chartModel,
   chartScale,
   costOf,
@@ -12,6 +13,7 @@ import {
   formatClock,
   formatGap,
   formatTimeOfDay,
+  fromSelect,
   gapMarkMs,
   formatStatus,
   guessCauses,
@@ -373,8 +375,8 @@ describe('settings', () => {
   test('picks saved before the band and language settings existed are kept', () => {
     const saved = { onExpiring: { value: 'auto', over: 'button' }, ttlMode: null }
 
-    expect(normalizeOverrides(saved)).toEqual({ ...saved, band: null, language: null })
-    expect(normalizeOverrides({ ...saved, band: null })).toEqual({ ...saved, band: null, language: null })
+    expect(normalizeOverrides(saved)).toEqual({ ...NO_OVERRIDES, ...saved })
+    expect(normalizeOverrides({ ...saved, band: null })).toEqual({ ...NO_OVERRIDES, ...saved })
   })
 
   test('picks held in an older shape apply without the newer fields', () => {
@@ -384,11 +386,87 @@ describe('settings', () => {
     expect(applyOverrides(DEFAULTS, old ?? NO_OVERRIDES)).toEqual({ ...DEFAULTS, band: 'off' })
   })
 
+  test('picks saved before the sensitivity, toast and limit settings existed are kept', () => {
+    const saved = {
+      onExpiring: { value: 'auto', over: 'button' },
+      ttlMode: null,
+      band: null,
+      language: { value: 'zh-TW', over: 'en' },
+    }
+
+    expect(normalizeOverrides(saved)).toEqual({ ...NO_OVERRIDES, ...saved })
+    expect(applyOverrides(DEFAULTS, normalizeOverrides(saved) ?? NO_OVERRIDES)).toEqual({
+      ...DEFAULTS,
+      onExpiring: 'auto',
+      language: 'zh-TW',
+    })
+  })
+
+  test('break sensitivity, toasts and the auto-extend limit can be picked and picked back', () => {
+    const high = withOverride(NO_OVERRIDES, DEFAULTS, 'breakSensitivity', 'high')
+    const quiet = withOverride(high, DEFAULTS, 'toast', false)
+    const five = withOverride(quiet, DEFAULTS, 'autoExtendMaxPerIdle', 5)
+
+    expect(applyOverrides(DEFAULTS, five)).toEqual({
+      ...DEFAULTS,
+      breakSensitivity: 'high',
+      toast: false,
+      autoExtendMaxPerIdle: 5,
+    })
+    expect(normalizeOverrides(five)).toEqual(five)
+
+    const back = withOverride(
+      withOverride(withOverride(five, DEFAULTS, 'breakSensitivity', 'medium'), DEFAULTS, 'toast', true),
+      DEFAULTS,
+      'autoExtendMaxPerIdle',
+      3,
+    )
+    expect(back).toEqual(NO_OVERRIDES)
+  })
+
+  test('a change in settings wins over a toast or limit picked in the panel', () => {
+    const picked = withOverride(withOverride(NO_OVERRIDES, DEFAULTS, 'toast', false), DEFAULTS, 'autoExtendMaxPerIdle', 0)
+
+    expect(applyOverrides({ ...DEFAULTS, toast: false, autoExtendMaxPerIdle: 7 }, picked)).toEqual({
+      ...DEFAULTS,
+      toast: false,
+      autoExtendMaxPerIdle: 7,
+    })
+  })
+
+  test('a value the field does not take leaves the picks as they were', () => {
+    const high = withOverride(NO_OVERRIDES, DEFAULTS, 'breakSensitivity', 'high')
+
+    expect(withOverride(high, DEFAULTS, 'breakSensitivity', 'extreme')).toEqual(high)
+    expect(withOverride(high, DEFAULTS, 'toast', 'false')).toEqual(high)
+    expect(withOverride(high, DEFAULTS, 'autoExtendMaxPerIdle', 500)).toEqual(high)
+  })
+
+  test("a Select's string reads as the field's value", () => {
+    expect(fromSelect('toast', 'false')).toBe(false)
+    expect(fromSelect('toast', 'true')).toBe(true)
+    expect(fromSelect('toast', 'off')).toBe(null)
+    expect(fromSelect('autoExtendMaxPerIdle', '10')).toBe(10)
+    expect(fromSelect('autoExtendMaxPerIdle', '')).toBe(null)
+    expect(fromSelect('autoExtendMaxPerIdle', '101')).toBe(null)
+    expect(fromSelect('breakSensitivity', 'low')).toBe('low')
+    expect(fromSelect('breakSensitivity', 'extreme')).toBe(null)
+    expect(fromSelect('language', 'zh-TW')).toBe('zh-TW')
+  })
+
+  test('the auto-extend steps keep a limit set in settings', () => {
+    expect(autoExtendSteps(3)).toEqual([0, 1, 3, 5, 10])
+    expect(autoExtendSteps(7)).toEqual([0, 1, 3, 5, 7, 10])
+    expect(autoExtendSteps(20)).toEqual([0, 1, 3, 5, 10, 20])
+  })
+
   test('a malformed saved pick reads as none', () => {
     expect(normalizeOverrides(null)).toBe(null)
     expect(normalizeOverrides({ onExpiring: null })).toBe(null)
     expect(normalizeOverrides({ onExpiring: null, ttlMode: null, band: { value: 'big', over: 'compact' } })).toBe(null)
     expect(normalizeOverrides({ ...NO_OVERRIDES, language: { value: 'fr', over: 'en' } })).toBe(null)
+    expect(normalizeOverrides({ ...NO_OVERRIDES, toast: { value: 'no', over: true } })).toBe(null)
+    expect(normalizeOverrides({ ...NO_OVERRIDES, autoExtendMaxPerIdle: { value: -1, over: 3 } })).toBe(null)
   })
 })
 

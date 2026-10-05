@@ -24,6 +24,9 @@ export type Overrides = {
   ttlMode: Override<TtlMode> | null
   band: Override<BandMode> | null
   language: Override<Language> | null
+  breakSensitivity: Override<BreakSensitivity> | null
+  toast: Override<boolean> | null
+  autoExtendMaxPerIdle: Override<number> | null
 }
 
 /** One main-thread model request's prompt cache usage. */

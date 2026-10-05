@@ -11,9 +11,11 @@ import {
   MAX_SAMPLES,
   NARROW_COLUMNS,
   NO_OVERRIDES,
+  SENSITIVITIES,
   anchorOf,
   appendCapped,
   applyOverrides,
+  autoExtendSteps,
   chartModel,
   contextOf,
   countdownOf,
@@ -23,6 +25,7 @@ import {
   formatPercent,
   formatStatus,
   formatTokens,
+  fromSelect,
   guessCauses,
   hitRateOf,
   isBreak,
@@ -117,7 +120,8 @@ export const register: Register = (on, options) => {
   // slash command.
   let extendNow: ((trigger: Extension['trigger'], shouldToast?: boolean) => Promise<string | null>) | null = null
   // Set by session.start: applies a setting picked in the panel or with
-  // `/cache lang`, resolving to why it failed, or null once it is done.
+  // `/cache lang` (as the Select's string), resolving to why it failed, or
+  // null once it is done.
   let pickOption: ((field: QuickSetting, value: string) => Promise<string | null>) | null = null
   // The ring's drawing stays the same while its anchor, TTL and phase do, so
   // its SMIL countdown keeps running across the band's redraws.
@@ -202,8 +206,10 @@ export const register: Register = (on, options) => {
     // Through `/config` where it has the row: the module reloads with the new
     // options. A plugin folder on desktop gets no rows, so the pick is kept as
     // an override instead, in `$.state` (redrawing) and `$.store`.
-    pickOption = async (field, value) => {
-      if (value === config[field]) {
+    pickOption = async (field, raw) => {
+      const value = fromSelect(field, raw)
+
+      if (value === null || value === config[field]) {
         return null
       }
 
@@ -668,14 +674,31 @@ export const register: Register = (on, options) => {
       </Text>
     )
 
-    const settings = (
+    const toastName = (isOn: boolean) => (isOn ? s.toastOptions.on : s.toastOptions.off)
+    const sensitivitySelect =
+      Select === null ? null : (
+        <Box flexDirection="column">
+          <Text dimColor>{s.breakSensitivityLabel}</Text>
+          <Select
+            key="breakSensitivity"
+            value={config.breakSensitivity}
+            options={SENSITIVITIES.map(v => ({ value: v, label: s.breakSensitivityOptions[v] }))}
+            onSelect={value => void setOption('breakSensitivity', value)}
+          />
+          <Text dimColor>{s.breakSensitivityNote}</Text>
+        </Box>
+      )
+
+    const settings = (withSensitivity: boolean) => (
       <Box flexDirection="column">
         {title(s.settingsTitle)}
         {Select === null ? (
           <Text dimColor>
-            {s.onExpiringLabel}: {s.onExpiringOptions[config.onExpiring]} · {s.ttlModeLabel}:{' '}
-            {s.ttlModeOptions[config.ttlMode]} · {s.bandLabel}: {s.bandOptions[config.band]} · {s.languageLabel}:{' '}
-            {LANGUAGE_NAMES[config.language]}
+            {s.onExpiringLabel}: {s.onExpiringOptions[config.onExpiring]}
+            {config.onExpiring === 'auto' ? ` (${s.autoExtendTimes(config.autoExtendMaxPerIdle)})` : ''} ·{' '}
+            {s.toastLabel}: {toastName(config.toast)} · {s.ttlModeLabel}: {s.ttlModeOptions[config.ttlMode]} ·{' '}
+            {s.bandLabel}: {s.bandOptions[config.band]} · {s.breakSensitivityLabel}:{' '}
+            {s.breakSensitivityOptions[config.breakSensitivity]} · {s.languageLabel}: {LANGUAGE_NAMES[config.language]}
             {ttlNote === null ? '' : `\n${ttlNote}`}
           </Text>
         ) : (
@@ -687,6 +710,30 @@ export const register: Register = (on, options) => {
                 value={config.onExpiring}
                 options={(['notify', 'button', 'auto'] as const).map(v => ({ value: v, label: s.onExpiringOptions[v] }))}
                 onSelect={value => void setOption('onExpiring', value)}
+              />
+            </Box>
+            {/* Only automatic extension has a limit to set. */}
+            {config.onExpiring === 'auto' ? (
+              <Box flexDirection="column">
+                <Text dimColor>{s.autoExtendMaxLabel}</Text>
+                <Select
+                  key="autoExtendMaxPerIdle"
+                  value={String(config.autoExtendMaxPerIdle)}
+                  options={autoExtendSteps(config.autoExtendMaxPerIdle).map(n => ({
+                    value: String(n),
+                    label: s.autoExtendTimes(n),
+                  }))}
+                  onSelect={value => void setOption('autoExtendMaxPerIdle', value)}
+                />
+              </Box>
+            ) : null}
+            <Box flexDirection="column">
+              <Text dimColor>{s.toastLabel}</Text>
+              <Select
+                key="toast"
+                value={String(config.toast)}
+                options={[true, false].map(v => ({ value: String(v), label: toastName(v) }))}
+                onSelect={value => void setOption('toast', value)}
               />
             </Box>
             <Box flexDirection="column">
@@ -708,6 +755,7 @@ export const register: Register = (on, options) => {
                 onSelect={value => void setOption('band', value)}
               />
             </Box>
+            {withSensitivity ? sensitivitySelect : null}
             <Box flexDirection="column">
               <Text dimColor>{s.languageLabel}</Text>
               <Select
@@ -737,7 +785,7 @@ export const register: Register = (on, options) => {
             )}
             <Text dimColor>{s.waiting}</Text>
           </Box>
-          {settings}
+          {settings(true)}
         </Box>
       )
     }
@@ -758,6 +806,7 @@ export const register: Register = (on, options) => {
 
     const canExtend = !isWorking && countdown.phase === 'alert' && config.onExpiring !== 'notify'
     const summary = summarize(list, breakList, extensionList)
+    const isQuiet = breakList.length === 0 && extensionList.length === 0
     // A narrow panel gets fewer, wider bars and a three-line readout. Its
     // width comes in cells; ~8.7px each on desktop, a guess only for spacing.
     const isNarrow = e.props.bodyColumns < NARROW_COLUMNS
@@ -874,7 +923,7 @@ export const register: Register = (on, options) => {
         )}
 
         {/* Nothing to list: one line says so, rather than two empty sections. */}
-        {breakList.length === 0 && extensionList.length === 0 ? (
+        {isQuiet ? (
           <Text dimColor>{s.quietHistory}</Text>
         ) : (
           <Box flexDirection="column" gap={1}>
@@ -898,6 +947,8 @@ export const register: Register = (on, options) => {
                     <Text dimColor>  {formatCauses(b.causes, s)}</Text>
                   </Box>
                 ))}
+              {/* Tuned where a misjudged break shows. */}
+              {sensitivitySelect === null ? null : <Box marginTop={1}>{sensitivitySelect}</Box>}
             </Box>
 
             <Box flexDirection="column">
@@ -921,7 +972,7 @@ export const register: Register = (on, options) => {
           </Box>
         )}
 
-        {settings}
+        {settings(isQuiet)}
       </Box>
     )
   })

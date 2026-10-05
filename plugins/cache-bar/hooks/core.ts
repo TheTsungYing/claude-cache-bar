@@ -10,6 +10,7 @@ import type {
   Extension,
   Language,
   OnExpiring,
+  Override,
   Overrides,
   SessionSummary,
   Ttl,
@@ -69,89 +70,133 @@ export const readConfig = (options: Readonly<Record<string, unknown>>): Config =
   autoExtendMaxPerIdle: clamp(options.autoExtendMaxPerIdle, 3, 0, 100),
   autoExtendMinContextK: clamp(options.autoExtendMinContextK, 20, 0, 10_000),
   autoExtendGiveUpMin: clamp(options.autoExtendGiveUpMin, 0, 0, 24 * 60),
-  breakSensitivity: pick(options.breakSensitivity, ['low', 'medium', 'high'], 'medium'),
+  breakSensitivity: pick(options.breakSensitivity, SENSITIVITIES, 'medium'),
 })
 
 // ---- Settings picked in the panel
 
-export const NO_OVERRIDES: Overrides = { onExpiring: null, ttlMode: null, band: null, language: null }
-
 const ON_EXPIRING: readonly OnExpiring[] = ['notify', 'button', 'auto']
 const TTL_MODES: readonly TtlMode[] = ['auto', '5m', '1h']
 const BAND_MODES: readonly BandMode[] = ['compact', 'off']
+export const SENSITIVITIES: readonly BreakSensitivity[] = ['low', 'medium', 'high']
 
-const isOverride = <T extends string>(value: unknown, allowed: readonly T[]) =>
+/** The panel's steps for the auto-extend limit; a value set elsewhere is added. */
+export const AUTO_EXTEND_STEPS: readonly number[] = [0, 1, 3, 5, 10]
+
+export type QuickSetting = keyof Overrides
+
+/** Overrides by field, typed so a generic field keeps its value's type. */
+type Picks = { [K in QuickSetting]: Override<Config[K]> | null }
+
+const oneOf =
+  <T extends string>(allowed: readonly T[]) =>
+  (value: unknown): value is T =>
+    allowed.some(a => a === value)
+
+/** What each field takes: the same bounds `readConfig` holds it to. */
+const IS_VALUE: { [K in QuickSetting]: (value: unknown) => value is Config[K] } = {
+  onExpiring: oneOf(ON_EXPIRING),
+  ttlMode: oneOf(TTL_MODES),
+  band: oneOf(BAND_MODES),
+  language: oneOf(LANGUAGES),
+  breakSensitivity: oneOf(SENSITIVITIES),
+  toast: (value): value is boolean => typeof value === 'boolean',
+  autoExtendMaxPerIdle: (value): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100,
+}
+
+export const QUICK_SETTINGS = Object.keys(IS_VALUE) as QuickSetting[]
+
+export const NO_OVERRIDES: Overrides = {
+  onExpiring: null,
+  ttlMode: null,
+  band: null,
+  language: null,
+  breakSensitivity: null,
+  toast: null,
+  autoExtendMaxPerIdle: null,
+}
+
+/** A Select's string as the field's value, or null when it isn't one. */
+export const fromSelect = <K extends QuickSetting>(field: K, raw: string): Config[K] | null => {
+  const value: unknown =
+    field === 'toast'
+      ? raw === 'true'
+        ? true
+        : raw === 'false'
+          ? false
+          : null
+      : field === 'autoExtendMaxPerIdle'
+        ? raw.trim() === ''
+          ? null
+          : Number(raw)
+        : raw
+
+  return IS_VALUE[field](value) ? value : null
+}
+
+/** The auto-extend Select's steps, with a value set elsewhere among them. */
+export const autoExtendSteps = (current: number): number[] =>
+  AUTO_EXTEND_STEPS.includes(current) ? [...AUTO_EXTEND_STEPS] : [...AUTO_EXTEND_STEPS, current].sort((a, b) => a - b)
+
+const isOverride = (field: QuickSetting, value: unknown) =>
   value === null ||
   (typeof value === 'object' &&
     'value' in value &&
     'over' in value &&
-    allowed.some(a => a === value.value) &&
-    allowed.some(a => a === value.over))
+    IS_VALUE[field](value.value) &&
+    IS_VALUE[field](value.over))
 
 /**
  * A `$.store` value as Overrides, or null when it is malformed. A field saved
- * before it existed (`band`, `language`) reads as no override, so an upgrade
- * keeps the rest.
+ * before it existed (`band`, `language`, `breakSensitivity`, ...) reads as no
+ * override, so an upgrade keeps the rest.
  */
 export const normalizeOverrides = (value: unknown): Overrides | null => {
   if (typeof value !== 'object' || value === null || !('onExpiring' in value) || !('ttlMode' in value)) {
     return null
   }
 
-  const band = 'band' in value ? value.band : null
-  const language = 'language' in value ? value.language : null
+  const saved = value as Record<string, unknown>
+  const fields = QUICK_SETTINGS.map(field => [field, saved[field] ?? null] as const)
 
-  if (
-    !isOverride(value.onExpiring, ON_EXPIRING) ||
-    !isOverride(value.ttlMode, TTL_MODES) ||
-    !isOverride(band, BAND_MODES) ||
-    !isOverride(language, LANGUAGES)
-  ) {
+  if (!fields.every(([field, pick]) => isOverride(field, pick))) {
     return null
   }
 
-  return {
-    onExpiring: value.onExpiring as Overrides['onExpiring'],
-    ttlMode: value.ttlMode as Overrides['ttlMode'],
-    band: band as Overrides['band'],
-    language: language as Overrides['language'],
+  return { ...NO_OVERRIDES, ...Object.fromEntries(fields) } as Overrides
+}
+
+const applyOne = <K extends QuickSetting>(config: Config, base: Config, field: K, pick: Picks[K]) => {
+  if (pick !== null && pick.over === base[field]) {
+    config[field] = pick.value
   }
 }
 
 /** The settings in force: each override while the value it replaced still stands. */
-export const applyOverrides = (base: Config, o: Overrides): Config => ({
-  ...base,
-  onExpiring: o.onExpiring !== null && o.onExpiring.over === base.onExpiring ? o.onExpiring.value : base.onExpiring,
-  ttlMode: o.ttlMode !== null && o.ttlMode.over === base.ttlMode ? o.ttlMode.value : base.ttlMode,
-  band: o.band !== null && o.band.over === base.band ? o.band.value : base.band,
-  language: o.language !== null && o.language.over === base.language ? o.language.value : base.language,
-})
+export const applyOverrides = (base: Config, o: Overrides): Config => {
+  const picks: Picks = o
+  const config = { ...base }
 
-export type QuickSetting = keyof Overrides
-
-/** Records a pick; picking the `userConfig` value again clears the override. */
-export const withOverride = (o: Overrides, base: Config, field: QuickSetting, value: string): Overrides => {
-  if (field === 'onExpiring') {
-    const picked = pick(value, ON_EXPIRING, base.onExpiring)
-
-    return { ...o, onExpiring: picked === base.onExpiring ? null : { value: picked, over: base.onExpiring } }
+  for (const field of QUICK_SETTINGS) {
+    applyOne(config, base, field, picks[field])
   }
 
-  if (field === 'band') {
-    const picked = pick(value, BAND_MODES, base.band)
+  return config
+}
 
-    return { ...o, band: picked === base.band ? null : { value: picked, over: base.band } }
+/**
+ * Records a pick; picking the `userConfig` value again clears the override,
+ * and a value the field doesn't take leaves the picks as they were.
+ */
+export const withOverride = <K extends QuickSetting>(o: Overrides, base: Config, field: K, value: unknown): Overrides => {
+  if (!IS_VALUE[field](value)) {
+    return o
   }
 
-  if (field === 'language') {
-    const picked = pick(value, LANGUAGES, base.language)
+  const pick: Override<Config[K]> | null = value === base[field] ? null : { value, over: base[field] }
 
-    return { ...o, language: picked === base.language ? null : { value: picked, over: base.language } }
-  }
-
-  const picked = pick(value, TTL_MODES, base.ttlMode)
-
-  return { ...o, ttlMode: picked === base.ttlMode ? null : { value: picked, over: base.ttlMode } }
+  return { ...o, [field]: pick }
 }
 
 /** Drops the override for `field`, once a `/config` row holds that setting. */
