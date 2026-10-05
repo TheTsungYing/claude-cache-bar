@@ -24,9 +24,9 @@ import {
   guessCauses,
   hitRateOf,
   isBreak,
-  isOverrides,
   isTtlState,
   learnTtl,
+  normalizeOverrides,
   notePrint,
   readConfig,
   recentHits,
@@ -53,9 +53,9 @@ import {
   chartSvg,
   clockSvg,
   idleRingSvg,
+  pausedRingSvg,
   ringSvg,
   sparklineSvg,
-  spinnerSvg,
 } from './svg'
 
 const samples = atom({ plugin: 'cache-bar', key: 'samples' } as const, [] as CacheSample[])
@@ -87,6 +87,9 @@ const COMMAND = 'cache'
 
 /** Rows the panel's break and extension lists show, newest first. */
 const LIST_ROWS = 8
+
+/** Text that needs you: the theme's error colour, so it follows light and dark. */
+const TEXT_ALERT = 'error'
 
 export const register: Register = (on, options) => {
   // The userConfig values, and those in force once the panel's picks apply.
@@ -125,9 +128,9 @@ export const register: Register = (on, options) => {
       await update($, ttl, current => (current.detected === null ? stored : current))
     }
 
-    const storedOverrides = await $.store.get(OVERRIDES_STORE_KEY)
+    const storedOverrides = normalizeOverrides(await $.store.get(OVERRIDES_STORE_KEY))
 
-    if (isOverrides(storedOverrides)) {
+    if (storedOverrides !== null) {
       await update($, overrides, () => storedOverrides)
     }
 
@@ -230,7 +233,7 @@ export const register: Register = (on, options) => {
 
       if (config.toast) {
         const notice = strings.expiresIn(formatClock(countdown.leftMs))
-        const hint = hasBand ? strings.pressExtend : strings.runExtend(EXTEND_COMMAND)
+        const hint = hasBand && config.band !== 'off' ? strings.pressExtend : strings.runExtend(EXTEND_COMMAND)
         $.ui.toast(config.onExpiring === 'notify' ? notice : `${notice} · ${hint}`)
       }
     })
@@ -388,20 +391,27 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // The band above the prompt, desktop only: ring, clock, hit rate, context,
-  // trend line, and the extend button once the cache is about to expire.
+  // The band above the prompt, desktop only, kept to one quiet row: ring,
+  // clock and Details. Hit rate, context and the trend line show on hover;
+  // a break mark and the extend button appear only when they need you.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.surface !== 'desktop' || e.props.hasSurvey) {
       return next(e)
     }
 
+    // Set even when the band is off: the desktop keeps no status line then.
     hasBand = true
-    const { Box, Text, Button, Svg } = $.ui.resolve(e)
     // Redraw on the stage, not every second: the ring and the clock count down
     // by SMIL, and a per-second redraw of the band resets an open Select's
     // highlight in the panel too.
     await read($, stage)
     config = applyOverrides(base, await read($, overrides))
+
+    if (config.band === 'off') {
+      return next(e)
+    }
+
+    const { Box, Text, Button, Svg } = $.ui.resolve(e)
     const now = await $.clock.now()
     const list = await read($, samples)
     const last = list.at(-1)
@@ -421,10 +431,12 @@ export const register: Register = (on, options) => {
 
     if (last === undefined) {
       return (
-        <Box flexDirection="row" alignItems="center" gap={1}>
+        <Box key="band" flexDirection="row" alignItems="center" gap={1}>
           <Svg key="ring" alt={s.ringAlt} source={idleRingSvg()} width={RING_SIZE} height={RING_SIZE} />
-          <Text dimColor>{s.waiting}</Text>
           {details}
+          <Box display="none" hover={{ display: 'flex' }}>
+            <Text dimColor>{s.waiting}</Text>
+          </Box>
         </Box>
       )
     }
@@ -442,29 +454,27 @@ export const register: Register = (on, options) => {
     const ringKey = isAnswering ? 'working' : `${countdown.anchor}|${countdown.ttl}|${countdown.phase}`
 
     if (ring.key !== ringKey) {
-      ring = { key: ringKey, source: isAnswering ? spinnerSvg() : ringSvg(countdown) }
+      ring = { key: ringKey, source: isAnswering ? pausedRingSvg() : ringSvg(countdown) }
     }
 
     const lastBreak = breakList.at(-1)
     const didBreak = lastBreak !== undefined && lastBreak.at === last.sentAt
+    const isExpired = !isAnswering && countdown.phase === 'expired'
     const canExtend = !isAnswering && countdown.phase === 'alert' && config.onExpiring !== 'notify'
     const clockColor =
-      countdown.phase === 'warn' ? COLORS.warn : countdown.phase === 'alert' ? COLORS.alert : COLORS.fresh
+      countdown.phase === 'warn' ? COLORS.warn : countdown.phase === 'alert' ? COLORS.alert : COLORS.neutral
 
     if (smallClock.key !== ringKey) {
       smallClock = { key: ringKey, ...clockSvg(countdown.leftMs, clockColor, CLOCK_SIZE) }
     }
 
     return (
-      <Box flexDirection="row" alignItems="center" gap={1}>
+      <Box key="band" flexDirection="row" alignItems="center" gap={1}>
         <Svg key="ring" alt={s.ringAlt} source={ring.source} width={RING_SIZE} height={RING_SIZE} />
+        {/* Answering: the countdown waits, since each request refreshes the cache. */}
         {isAnswering ? (
-          <Text color={COLORS.working}>{s.working}</Text>
-        ) : countdown.phase === 'expired' ? (
-          <Text color={COLORS.expired}>
-            {s.expired} · {s.rewriteNext(context)}
-          </Text>
-        ) : (
+          <Text dimColor>…</Text>
+        ) : isExpired ? null : (
           <Svg
             key="clock"
             alt={formatClock(countdown.leftMs)}
@@ -473,31 +483,45 @@ export const register: Register = (on, options) => {
             height={smallClock.height}
           />
         )}
-        <Text dimColor>{s.ttl(config.ttlMode, countdown.ttl)}</Text>
-        <Text>
-          <Text dimColor>{s.hit} </Text>
-          {formatPercent(hitRateOf(last))}
-        </Text>
-        <Text>
-          <Text dimColor>{s.context} </Text>
-          {context}
-        </Text>
-        {list.length > 1 ? (
-          <Svg
-            key="spark"
-            alt={s.sparkAlt}
-            source={sparklineSvg(recentHits(list, breakList, SPARK_POINTS))}
-            width={SPARK_WIDTH}
-            height={SPARK_HEIGHT}
-          />
-        ) : null}
-        {didBreak ? <Text color={COLORS.alert}>⚠ {s.broke(formatCauses(lastBreak.causes, s))}</Text> : null}
         {isExtending ? (
           <Text dimColor>{s.extending}</Text>
         ) : canExtend ? (
-          <Button key="extend" variant="primary" label={s.extend(context)} onPress={() => void extendNow?.('manual')} />
+          <Button key="extend" variant="primary" label={s.extendShort} onPress={() => void extendNow?.('manual')} />
         ) : null}
         {details}
+        {didBreak ? (
+          <Box key="break" flexDirection="row" gap={1}>
+            <Text color={TEXT_ALERT}>⚠</Text>
+            <Box display="none" hover={{ display: 'flex' }}>
+              <Text color={TEXT_ALERT}>{s.broke(formatCauses(lastBreak.causes, s))}</Text>
+            </Box>
+          </Box>
+        ) : null}
+        {/* Shown while the pointer is over the band; after the buttons, so it never moves them. */}
+        <Box display="none" hover={{ display: 'flex' }} flexDirection="row" alignItems="center" gap={1}>
+          {isExpired ? (
+            <Text dimColor>
+              {s.expired} · {s.rewriteNext(context)}
+            </Text>
+          ) : null}
+          <Text>
+            <Text dimColor>{s.hit} </Text>
+            {formatPercent(hitRateOf(last))}
+          </Text>
+          <Text>
+            <Text dimColor>{s.context} </Text>
+            {context}
+          </Text>
+          {list.length > 1 ? (
+            <Svg
+              key="spark"
+              alt={s.sparkAlt}
+              source={sparklineSvg(recentHits(list, breakList, SPARK_POINTS))}
+              width={SPARK_WIDTH}
+              height={SPARK_HEIGHT}
+            />
+          ) : null}
+        </Box>
       </Box>
     )
   })
@@ -584,7 +608,7 @@ export const register: Register = (on, options) => {
         {Select === null ? (
           <Text dimColor>
             {s.onExpiringLabel}: {s.onExpiringOptions[config.onExpiring]} · {s.ttlModeLabel}:{' '}
-            {s.ttlModeOptions[config.ttlMode]}
+            {s.ttlModeOptions[config.ttlMode]} · {s.bandLabel}: {s.bandOptions[config.band]}
           </Text>
         ) : (
           <Box flexDirection="column" gap={1}>
@@ -604,6 +628,15 @@ export const register: Register = (on, options) => {
                 value={config.ttlMode}
                 options={(['auto', '5m', '1h'] as const).map(v => ({ value: v, label: s.ttlModeOptions[v] }))}
                 onSelect={value => void setOption('ttlMode', value)}
+              />
+            </Box>
+            <Box flexDirection="column">
+              <Text dimColor>{s.bandLabel}</Text>
+              <Select
+                key="band"
+                value={config.band}
+                options={(['compact', 'off'] as const).map(v => ({ value: v, label: s.bandOptions[v] }))}
+                onSelect={value => void setOption('band', value)}
               />
             </Box>
           </Box>
@@ -635,14 +668,14 @@ export const register: Register = (on, options) => {
     const ringKey = isWorking ? 'working' : `${countdown.anchor}|${countdown.ttl}|${countdown.phase}`
 
     if (bigRing.key !== ringKey) {
-      bigRing = { key: ringKey, source: isWorking ? spinnerSvg(BIG_RING_SIZE) : ringSvg(countdown, BIG_RING_SIZE) }
+      bigRing = { key: ringKey, source: isWorking ? pausedRingSvg(BIG_RING_SIZE) : ringSvg(countdown, BIG_RING_SIZE) }
     }
 
     const clockColor =
       countdown.phase === 'warn' ? COLORS.warn : countdown.phase === 'alert' ? COLORS.alert : undefined
 
     if (bigClock.key !== ringKey) {
-      bigClock = { key: ringKey, ...clockSvg(countdown.leftMs, clockColor ?? COLORS.fresh, BIG_CLOCK_SIZE) }
+      bigClock = { key: ringKey, ...clockSvg(countdown.leftMs, clockColor ?? COLORS.neutral, BIG_CLOCK_SIZE) }
     }
 
     const canExtend = !isWorking && countdown.phase === 'alert' && config.onExpiring !== 'notify'
@@ -677,11 +710,9 @@ export const register: Register = (on, options) => {
           )}
           <Box flexDirection="column">
             {isWorking ? (
-              <Text bold color={COLORS.working}>
-                {s.working}
-              </Text>
+              <Text dimColor>{s.working}</Text>
             ) : countdown.phase === 'expired' ? (
-              <Text bold color={COLORS.expired}>
+              <Text dimColor>
                 {s.expired} · {s.rewriteNext(context)}
               </Text>
             ) : Svg === null ? (
@@ -754,7 +785,7 @@ export const register: Register = (on, options) => {
             .map(b => (
               <Box flexDirection="column">
                 <Text>
-                  <Text color={COLORS.alert}>● </Text>
+                  <Text color={TEXT_ALERT}>● </Text>
                   {s.breakLine(
                     numberOf(b.at),
                     formatPercent(b.previousHitRate),
@@ -780,7 +811,7 @@ export const register: Register = (on, options) => {
                 {x.isAnswered ? (
                   s.extensionRead(formatTokens(x.read))
                 ) : (
-                  <Text color={COLORS.alert}>{s.extensionFailed(x.reason ?? '')}</Text>
+                  <Text color={TEXT_ALERT}>{s.extensionFailed(x.reason ?? '')}</Text>
                 )}
               </Text>
             ))}

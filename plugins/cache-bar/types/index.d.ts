@@ -9,6 +9,9 @@ export type BreakSensitivity = 'low' | 'medium' | 'high'
 
 export type OnExpiring = 'notify' | 'button' | 'auto'
 
+/** The desktop band above the prompt: compact, or not drawn at all. */
+export type BandMode = 'compact' | 'off'
+
 /**
  * A setting picked in the panel where `$.config` has no row for it (a plugin
  * folder on desktop). It stands while the `userConfig` value it replaced,
@@ -19,6 +22,7 @@ export type Override<T> = { value: T; over: T }
 export type Overrides = {
   onExpiring: Override<OnExpiring> | null
   ttlMode: Override<TtlMode> | null
+  band: Override<BandMode> | null
 }
 
 /** One main-thread model request's prompt cache usage. */

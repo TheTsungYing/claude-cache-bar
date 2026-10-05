@@ -11,6 +11,7 @@ import {
   guessCauses,
   isBreak,
   learnTtl,
+  normalizeOverrides,
   notePrint,
   readConfig,
   shouldAutoExtend,
@@ -338,6 +339,26 @@ describe('settings', () => {
     const picked = withOverride(NO_OVERRIDES, DEFAULTS, 'ttlMode', '1h')
 
     expect(withOverride(picked, DEFAULTS, 'ttlMode', 'auto')).toEqual(NO_OVERRIDES)
+  })
+
+  test('the band can be turned off in the panel and back on', () => {
+    const off = withOverride(NO_OVERRIDES, DEFAULTS, 'band', 'off')
+
+    expect(DEFAULTS.band).toBe('compact')
+    expect(applyOverrides(DEFAULTS, off).band).toBe('off')
+    expect(withOverride(off, DEFAULTS, 'band', 'compact')).toEqual(NO_OVERRIDES)
+  })
+
+  test('picks saved before the band setting existed are kept', () => {
+    const saved = { onExpiring: { value: 'auto', over: 'button' }, ttlMode: null }
+
+    expect(normalizeOverrides(saved)).toEqual({ ...saved, band: null })
+  })
+
+  test('a malformed saved pick reads as none', () => {
+    expect(normalizeOverrides(null)).toBe(null)
+    expect(normalizeOverrides({ onExpiring: null })).toBe(null)
+    expect(normalizeOverrides({ onExpiring: null, ttlMode: null, band: { value: 'big', over: 'compact' } })).toBe(null)
   })
 })
 

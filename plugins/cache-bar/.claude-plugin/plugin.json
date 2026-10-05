@@ -26,10 +26,17 @@
       "default": "button",
       "options": ["notify", "button", "auto"]
     },
+    "band": {
+      "type": "string",
+      "title": "Band above the prompt",
+      "description": "Desktop only. compact: the countdown, with details on hover; off: no band, toasts only",
+      "default": "compact",
+      "options": ["compact", "off"]
+    },
     "warnAtPercent": {
       "type": "number",
       "title": "Warn at % left",
-      "description": "The bar turns yellow and blinks when this much of the TTL is left",
+      "description": "The countdown turns orange when this much of the TTL is left",
       "default": 20,
       "min": 1,
       "max": 99

@@ -4,14 +4,14 @@
 
 import type { Phase } from './core'
 
+// Claude's palette: a warm neutral while all is well, colour only when
+// something needs you. Mid tones, since a drawing can't follow the theme.
 export const COLORS = {
-  fresh: '#1D9E75',
-  warn: '#EF9F27',
+  neutral: '#8F8B83',
+  warn: '#D97757',
   alert: '#E24B4A',
-  expired: '#E24B4A',
-  working: '#378ADD',
-  track: '#88878055',
-  line: '#1D9E75',
+  expired: '#8F8B83',
+  track: '#8F8B8340',
   read: '#1D9E75',
   written: '#EF9F27',
   uncached: '#888780',
@@ -19,10 +19,11 @@ export const COLORS = {
   label: '#888780',
 } as const
 
-export const RING_SIZE = 28
+/** One line of text high, so the band stays one row. */
+export const RING_SIZE = 16
 
 /** The side panel's ring. */
-export const BIG_RING_SIZE = 72
+export const BIG_RING_SIZE = 48
 
 const n = (x: number) => Number(x.toFixed(2))
 
@@ -32,9 +33,9 @@ const at = (ms: number) => `${n(Math.max(0, ms) / 1000)}s`
 const svg = (width: number, height: number, body: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${body}</svg>`
 
-/** A ring of `size` pixels: the band's keeps a 3px stroke, larger ones scale it. */
+/** A ring of `size` pixels: the band's keeps a 2px stroke, larger ones scale it. */
 const ringGeometry = (size: number) => {
-  const stroke = Math.max(3, n(size / 12))
+  const stroke = Math.max(2, n(size / 12))
   const r = size / 2 - stroke
 
   return { stroke, c: size / 2, r, circumference: 2 * Math.PI * r }
@@ -55,8 +56,8 @@ export type RingView = {
 
 /**
  * The countdown ring, shrinking from what is left now to nothing over the
- * time left. It turns yellow and blinks at the warn threshold, red at the
- * alert one, and becomes a red dashed circle at expiry, all by SMIL timing.
+ * time left. It turns orange at the warn threshold, red at the alert one, and
+ * becomes a grey dashed circle at expiry, all by SMIL timing. Nothing blinks.
  */
 export const ringSvg = ({ leftMs, totalMs, warnMs, alertMs, phase }: RingView, size = RING_SIZE) => {
   const g = ringGeometry(size)
@@ -68,14 +69,13 @@ export const ringSvg = ({ leftMs, totalMs, warnMs, alertMs, phase }: RingView, s
 
   const fraction = Math.min(1, Math.max(0, leftMs / totalMs))
   const startOffset = n(g.circumference * (1 - fraction))
-  const color = phase === 'fresh' ? COLORS.fresh : phase === 'warn' ? COLORS.warn : COLORS.alert
+  const color = phase === 'fresh' ? COLORS.neutral : phase === 'warn' ? COLORS.warn : COLORS.alert
   const toWarn = leftMs - warnMs
   const toAlert = leftMs - alertMs
 
   const shrink = `<animate attributeName="stroke-dashoffset" from="${startOffset}" to="${n(g.circumference)}" dur="${at(leftMs)}" fill="freeze"/>`
   const turnWarn = phase === 'fresh' ? `<set attributeName="stroke" to="${COLORS.warn}" begin="${at(toWarn)}" fill="freeze"/>` : ''
   const turnAlert = phase !== 'alert' ? `<set attributeName="stroke" to="${COLORS.alert}" begin="${at(toAlert)}" fill="freeze"/>` : ''
-  const blink = `<animate attributeName="opacity" values="1;0.3;1" dur="1s" begin="${at(toWarn)}" repeatCount="indefinite"/>`
 
   const track = circle(
     g,
@@ -86,33 +86,23 @@ export const ringSvg = ({ leftMs, totalMs, warnMs, alertMs, phase }: RingView, s
   const arc = circle(
     g,
     `stroke="${color}" stroke-linecap="round" stroke-dasharray="${n(g.circumference)}" stroke-dashoffset="${startOffset}" transform="rotate(-90 ${g.c} ${g.c})"`,
-    shrink + turnWarn + turnAlert + blink + `<set attributeName="visibility" to="hidden" begin="${at(leftMs)}" fill="freeze"/>`,
+    shrink + turnWarn + turnAlert + `<set attributeName="visibility" to="hidden" begin="${at(leftMs)}" fill="freeze"/>`,
   )
 
   return svg(size, size, track + arc)
 }
 
-/** A quarter arc spinning: Claude is answering, the countdown waits. */
-export const spinnerSvg = (size = RING_SIZE) => {
-  const g = ringGeometry(size)
-
-  return svg(
-    size,
-    size,
-    circle(g, `stroke="${COLORS.track}"`) +
-      circle(
-        g,
-        `stroke="${COLORS.working}" stroke-linecap="round" stroke-dasharray="${n(g.circumference / 4)} ${n(g.circumference)}"`,
-        `<animateTransform attributeName="transform" type="rotate" from="0 ${g.c} ${g.c}" to="360 ${g.c} ${g.c}" dur="1s" repeatCount="indefinite"/>`,
-      ),
-  )
-}
+/**
+ * A full grey ring, still: Claude is answering and the countdown waits. Claude
+ * shows its own activity, so this one doesn't move.
+ */
+export const pausedRingSvg = (size = RING_SIZE) => svg(size, size, circle(ringGeometry(size), `stroke="${COLORS.neutral}"`))
 
 /** No request yet: an empty grey ring. */
 export const idleRingSvg = (size = RING_SIZE) => svg(size, size, circle(ringGeometry(size), `stroke="${COLORS.track}"`))
 
 export const SPARK_WIDTH = 72
-export const SPARK_HEIGHT = 20
+export const SPARK_HEIGHT = 16
 
 /** Hit rate per request as a line, 0% at the bottom; a red dot where the cache broke. */
 export const sparklineSvg = (points: readonly { rate: number; isBreak: boolean }[]) => {
@@ -120,7 +110,7 @@ export const sparklineSvg = (points: readonly { rate: number; isBreak: boolean }
   const step = points.length > 1 ? (SPARK_WIDTH - 2 * pad) / (points.length - 1) : 0
   const xy = points.map((p, i) => ({ x: n(pad + i * step), y: n(pad + (1 - p.rate) * (SPARK_HEIGHT - 2 * pad)), p }))
   const baseline = `<line x1="${pad}" y1="${SPARK_HEIGHT - pad}" x2="${SPARK_WIDTH - pad}" y2="${SPARK_HEIGHT - pad}" stroke="${COLORS.track}" stroke-width="1"/>`
-  const line = `<polyline points="${xy.map(q => `${q.x},${q.y}`).join(' ')}" fill="none" stroke="${COLORS.line}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`
+  const line = `<polyline points="${xy.map(q => `${q.x},${q.y}`).join(' ')}" fill="none" stroke="${COLORS.neutral}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>`
   const dots = xy
     .filter(q => q.p.isBreak)
     .map(q => `<circle cx="${q.x}" cy="${q.y}" r="2.2" fill="${COLORS.alert}"/>`)

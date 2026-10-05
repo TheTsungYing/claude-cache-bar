@@ -1,4 +1,4 @@
-import type { BreakCause, Language, Ttl, TtlMode } from '../types'
+import type { BandMode, BreakCause, Language, Ttl, TtlMode } from '../types'
 
 export type Strings = {
   waiting: string
@@ -13,6 +13,8 @@ export type Strings = {
   working: string
   /** The extend button: `k` is the context it would read, formatted. */
   extend: (k: string) => string
+  /** The band's extend button, kept short. */
+  extendShort: string
   extending: string
   /** Expired: the next request writes the whole context again. */
   rewriteNext: (k: string) => string
@@ -63,6 +65,8 @@ export type Strings = {
   onExpiringOptions: Record<'notify' | 'button' | 'auto', string>
   ttlModeLabel: string
   ttlModeOptions: Record<TtlMode, string>
+  bandLabel: string
+  bandOptions: Record<BandMode, string>
   settingFailed: (reason: string) => string
   /** When an extension ran: `clock` idle since the last request. */
   idleAt: (clock: string) => string
@@ -89,6 +93,7 @@ export const STRINGS: Record<Language, Strings> = {
     unknownCause: 'cause unknown',
     working: 'answering',
     extend: k => `Extend · ~${k} read`,
+    extendShort: 'Extend',
     extending: 'extending…',
     rewriteNext: k => `next request rewrites ${k}`,
     expiresIn: clock => `Prompt cache expires in ${clock}`,
@@ -131,6 +136,8 @@ export const STRINGS: Record<Language, Strings> = {
     onExpiringOptions: { notify: 'Notify only', button: 'Notify + Extend button', auto: 'Extend automatically' },
     ttlModeLabel: 'Cache TTL',
     ttlModeOptions: { auto: 'Auto-detect', '5m': '5 minutes', '1h': '1 hour' },
+    bandLabel: 'Band above the prompt',
+    bandOptions: { compact: 'Compact', off: 'Off' },
     settingFailed: reason => `Couldn't change the setting: ${reason}`,
     idleAt: clock => `${clock} idle`,
   },
@@ -152,6 +159,7 @@ export const STRINGS: Record<Language, Strings> = {
     unknownCause: '原因不明',
     working: '回覆中',
     extend: k => `延長 · ~${k} 讀取`,
+    extendShort: '延長',
     extending: '延長中…',
     rewriteNext: k => `下次請求將重寫 ${k}`,
     expiresIn: clock => `快取將在 ${clock} 後過期`,
@@ -194,6 +202,8 @@ export const STRINGS: Record<Language, Strings> = {
     onExpiringOptions: { notify: '只通知', button: '通知 + 延長按鈕', auto: '自動延長' },
     ttlModeLabel: '快取 TTL',
     ttlModeOptions: { auto: '自動偵測', '5m': '5 分鐘', '1h': '1 小時' },
+    bandLabel: '輸入框上方橫條',
+    bandOptions: { compact: '精簡', off: '關閉' },
     settingFailed: reason => `無法變更設定：${reason}`,
     idleAt: clock => `閒置 ${clock} 時`,
   },

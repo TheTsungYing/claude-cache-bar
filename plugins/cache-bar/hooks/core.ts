@@ -1,6 +1,7 @@
 // Pure logic over plain data: no `$` here, so tests can call it directly.
 
 import type {
+  BandMode,
   BreakCause,
   BreakSensitivity,
   CacheBreak,
@@ -32,12 +33,13 @@ const MIN_PROOF_TOKENS = 1024
 
 // ---- Config
 
-export type { OnExpiring }
+export type { BandMode, OnExpiring }
 
 export type Config = {
   language: Language
   ttlMode: TtlMode
   onExpiring: OnExpiring
+  band: BandMode
   warnAtPercent: number
   alertAtPercent: number
   toast: boolean
@@ -58,6 +60,7 @@ export const readConfig = (options: Readonly<Record<string, unknown>>): Config =
   language: pick(options.language, ['en', 'zh-TW'], 'en'),
   ttlMode: pick(options.ttlMode, ['auto', '5m', '1h'], 'auto'),
   onExpiring: pick(options.onExpiring, ['notify', 'button', 'auto'], 'button'),
+  band: pick(options.band, ['compact', 'off'], 'compact'),
   warnAtPercent: clamp(options.warnAtPercent, 20, 1, 99),
   alertAtPercent: clamp(options.alertAtPercent, 10, 1, 99),
   toast: typeof options.toast === 'boolean' ? options.toast : true,
@@ -69,10 +72,11 @@ export const readConfig = (options: Readonly<Record<string, unknown>>): Config =
 
 // ---- Settings picked in the panel
 
-export const NO_OVERRIDES: Overrides = { onExpiring: null, ttlMode: null }
+export const NO_OVERRIDES: Overrides = { onExpiring: null, ttlMode: null, band: null }
 
 const ON_EXPIRING: readonly OnExpiring[] = ['notify', 'button', 'auto']
 const TTL_MODES: readonly TtlMode[] = ['auto', '5m', '1h']
+const BAND_MODES: readonly BandMode[] = ['compact', 'off']
 
 const isOverride = <T extends string>(value: unknown, allowed: readonly T[]) =>
   value === null ||
@@ -82,20 +86,34 @@ const isOverride = <T extends string>(value: unknown, allowed: readonly T[]) =>
     allowed.some(a => a === value.value) &&
     allowed.some(a => a === value.over))
 
-/** Whether a `$.store` value is a well-formed Overrides. */
-export const isOverrides = (value: unknown): value is Overrides =>
-  typeof value === 'object' &&
-  value !== null &&
-  'onExpiring' in value &&
-  'ttlMode' in value &&
-  isOverride(value.onExpiring, ON_EXPIRING) &&
-  isOverride(value.ttlMode, TTL_MODES)
+/**
+ * A `$.store` value as Overrides, or null when it is malformed. A field saved
+ * before it existed (`band`) reads as no override, so an upgrade keeps the rest.
+ */
+export const normalizeOverrides = (value: unknown): Overrides | null => {
+  if (typeof value !== 'object' || value === null || !('onExpiring' in value) || !('ttlMode' in value)) {
+    return null
+  }
+
+  const band = 'band' in value ? value.band : null
+
+  if (!isOverride(value.onExpiring, ON_EXPIRING) || !isOverride(value.ttlMode, TTL_MODES) || !isOverride(band, BAND_MODES)) {
+    return null
+  }
+
+  return {
+    onExpiring: value.onExpiring as Overrides['onExpiring'],
+    ttlMode: value.ttlMode as Overrides['ttlMode'],
+    band: band as Overrides['band'],
+  }
+}
 
 /** The settings in force: each override while the value it replaced still stands. */
 export const applyOverrides = (base: Config, o: Overrides): Config => ({
   ...base,
   onExpiring: o.onExpiring !== null && o.onExpiring.over === base.onExpiring ? o.onExpiring.value : base.onExpiring,
   ttlMode: o.ttlMode !== null && o.ttlMode.over === base.ttlMode ? o.ttlMode.value : base.ttlMode,
+  band: o.band !== null && o.band.over === base.band ? o.band.value : base.band,
 })
 
 export type QuickSetting = keyof Overrides
@@ -106,6 +124,12 @@ export const withOverride = (o: Overrides, base: Config, field: QuickSetting, va
     const picked = pick(value, ON_EXPIRING, base.onExpiring)
 
     return { ...o, onExpiring: picked === base.onExpiring ? null : { value: picked, over: base.onExpiring } }
+  }
+
+  if (field === 'band') {
+    const picked = pick(value, BAND_MODES, base.band)
+
+    return { ...o, band: picked === base.band ? null : { value: picked, over: base.band } }
   }
 
   const picked = pick(value, TTL_MODES, base.ttlMode)
