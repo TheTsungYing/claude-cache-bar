@@ -41,6 +41,7 @@ import {
   toExtension,
   toSample,
   withOverride,
+  withoutOverride,
 } from './core'
 import type { QuickSetting } from './core'
 import { LANGUAGE_NAMES, STRINGS } from './i18n'
@@ -214,19 +215,24 @@ export const register: Register = (on, options) => {
 
         if (row === undefined) {
           await update($, overrides, o => withOverride(normalizeOverrides(o) ?? NO_OVERRIDES, base, field, value))
-          const picked = await read($, overrides)
-          applyPicks(picked)
-          await $.store.set(OVERRIDES_STORE_KEY, picked)
-
-          if (field === 'language' && (await $.ui.panes()).some(pane => pane.id === PANE)) {
-            await $.ui.open({ id: PANE, title: strings.paneTitle })
-          }
         } else {
           const result = await $.config.set({ key: row.key, value })
 
           if (result.deny !== undefined) {
             return strings.settingFailed(result.deny)
           }
+
+          // An override kept from before the row existed would still win over
+          // it while the value it replaced stands, so the row's pick drops it.
+          await update($, overrides, o => withoutOverride(normalizeOverrides(o) ?? NO_OVERRIDES, field))
+        }
+
+        const picked = await read($, overrides)
+        applyPicks(picked)
+        await $.store.set(OVERRIDES_STORE_KEY, picked)
+
+        if (field === 'language' && (await $.ui.panes()).some(pane => pane.id === PANE)) {
+          await $.ui.open({ id: PANE, title: strings.paneTitle })
         }
 
         // Once the panel closes, nothing on screen leads back: say how.

@@ -29,6 +29,8 @@ const world = (on: On) => {
   const clock = mock.clock(on, { now: T0 })
   const status: (string | undefined)[] = []
   const forks: string[] = []
+  // A test sets this to give the plugin its /config row for the language.
+  const settings = { language: null as string | null }
   mock.store(on)
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
   on('command.register', async ($, e) => ({ value: { command: e.name } }))
@@ -40,7 +42,27 @@ const world = (on: On) => {
   on('ui.toast', async () => ({ value: undefined }))
   on('ui.panes', async () => ({ value: [] }))
   // A plugin folder: no settings rows, so picks are kept as overrides.
-  on('config.list', async () => ({ value: [] }))
+  on('config.list', async () => ({
+    value:
+      settings.language === null
+        ? []
+        : [
+            {
+              key: 'cache-bar.language',
+              label: 'Language',
+              kind: 'choice' as const,
+              value: settings.language,
+              options: ['en', 'zh-TW'],
+              provider: { plugin: 'cache-bar' } as never,
+              isLocked: false,
+            },
+          ],
+  }))
+  on('config.set', async ($, e) => {
+    settings.language = String(e.value)
+
+    return { value: e.value }
+  })
   on('model.fork', async ($, e) => {
     forks.push(e.prompt)
     const usage = { ...USAGE, cache_creation_input_tokens: 0, output_tokens: 4 }
@@ -51,7 +73,7 @@ const world = (on: On) => {
     return { turnId: e.turnId, index: e.index, answer: 'hi', toolUses: [], stopReason: 'end_turn', usage: USAGE }
   })
 
-  return { clock, status, forks }
+  return { clock, status, forks, settings }
 }
 
 test('the terminal status line counts down, then points at /cache-extend', { options: { ttlMode: '5m' } }, async ($, on) => {
@@ -122,4 +144,14 @@ test('session.start keeps a language picked with /cache lang', async ($, on) => 
   await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
 
   expect((await $.command.run(EXTEND)).text).toBe('還沒有送出請求，沒有可延長的快取')
+})
+
+test('/cache lang wins over a pick saved before the settings row existed', async ($, on) => {
+  const { settings } = world(on)
+  await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+  await $.command.run(cache('lang zh-TW'))
+  settings.language = 'en'
+
+  expect((await $.command.run(cache('lang en'))).text).toBe('Language: English')
+  expect((await $.command.run(EXTEND)).text).toBe('Nothing is cached yet: no request has been sent')
 })

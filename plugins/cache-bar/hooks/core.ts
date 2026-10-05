@@ -154,6 +154,9 @@ export const withOverride = (o: Overrides, base: Config, field: QuickSetting, va
   return { ...o, ttlMode: picked === base.ttlMode ? null : { value: picked, over: base.ttlMode } }
 }
 
+/** Drops the override for `field`, once a `/config` row holds that setting. */
+export const withoutOverride = (o: Overrides, field: QuickSetting): Overrides => ({ ...o, [field]: null })
+
 // ---- /cache arguments
 
 /** What `/cache` was asked: open the panel, switch the language, or neither. */
