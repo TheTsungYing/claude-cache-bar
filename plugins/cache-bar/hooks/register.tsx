@@ -28,6 +28,7 @@ import {
   isBreak,
   isTtlState,
   learnTtl,
+  legendMarks,
   normalizeOverrides,
   notePrint,
   parseCacheArgs,
@@ -763,6 +764,7 @@ export const register: Register = (on, options) => {
       isNarrow ? NARROW_CHART_BARS : CHART_BARS,
     )
     const chartFirst = chart.bars[0]?.number ?? 0
+    const chartMarks = legendMarks(chart)
     const chartDrawing = chartSvg(
       chart,
       `${chart.isCapped ? '≤ ' : ''}${formatTokens(Math.round(chart.top))}`,
@@ -841,21 +843,26 @@ export const register: Register = (on, options) => {
           <Box flexDirection="column">
             {title(s.chartTitle)}
             <Svg key="chart" alt={s.chartAlt} source={chartDrawing.source} height={chartDrawing.height} isInteractive />
-            <Box flexDirection="row" gap={2} flexWrap="wrap">
+            {/* What every chart has on one row; the occasional marks, when shown, on a second. */}
+            <Box flexDirection="row" columnGap={2} rowGap={0} flexWrap="wrap">
               {/* Opaque swatches: the bars' see-through greys vanish as text. */}
               {swatch(COLORS.neutral, '■', s.legend.read)}
               {swatch(COLORS.written, '■', s.legend.written)}
               {swatch(COLORS.neutral, '□', s.legend.uncached)}
               <Text>
                 <Text color={COLORS.neutral}>▬</Text>
-                <Text color={COLORS.dip}>▬</Text>
-                <Text color={COLORS.warn}>▬</Text>
+                {chartMarks.dip ? <Text color={COLORS.dip}>▬</Text> : null}
+                {chartMarks.low ? <Text color={COLORS.warn}>▬</Text> : null}
                 <Text dimColor> {s.legend.rate}</Text>
               </Text>
-              {swatch(COLORS.alert, '▬', s.legend.broke)}
-              {swatch(COLORS.neutral, '┊', s.legend.gap)}
-              {swatch(COLORS.neutral, '▲', s.legend.extension)}
             </Box>
+            {chartMarks.broke || chartMarks.gap || chartMarks.extension ? (
+              <Box flexDirection="row" columnGap={2} rowGap={0} flexWrap="wrap">
+                {chartMarks.broke ? swatch(COLORS.alert, '▬', s.legend.broke) : null}
+                {chartMarks.gap ? swatch(COLORS.neutral, '┊', s.legend.gap) : null}
+                {chartMarks.extension ? swatch(COLORS.neutral, '▲', s.legend.extension) : null}
+              </Box>
+            ) : null}
           </Box>
         )}
 

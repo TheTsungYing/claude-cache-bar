@@ -17,6 +17,7 @@ import {
   hitLevelOf,
   isBreak,
   learnTtl,
+  legendMarks,
   normalizeOverrides,
   parseCacheArgs,
   notePrint,
@@ -483,6 +484,14 @@ describe('panel chart', () => {
     expect(model.extensionsAfter).toBe(1)
     expect(model.bars.map(b => b.isLatest)).toEqual([false, false, false, true])
     expect(model.bars.every(b => !b.isTtlKnown)).toBe(true)
+    expect(legendMarks(model)).toEqual({ dip: false, low: false, broke: false, gap: true, extension: true })
+    expect(legendMarks(chartModel(list.slice(0, 3), [], [], 'auto', EMPTY_TTL, 40))).toEqual({
+      dip: false,
+      low: false,
+      broke: false,
+      gap: false,
+      extension: false,
+    })
   })
 
   test('a clipped bar fills the plot and says so', () => {
@@ -531,6 +540,9 @@ describe('panel chart', () => {
     expect(readoutOf(model.bars[1]!, en)[0]).toMatch(/ · idle 2:00 · → haiku-4-5$/)
     expect(readoutOf(model.bars[1]!, en)[1]).toBe(`break · rewrote 148.0k · likely: ${en.causes.model}`)
     expect(readoutOf(model.bars[1]!, en, true).slice(1)).toEqual(['break · rewrote 148.0k', `likely: ${en.causes.model}`])
+    expect(readoutOf(chartModel([s, after(s, 65 * MINUTE, 100_000)], [], [], 'auto', EMPTY_TTL, 40).bars[1]!, en)[0]).toMatch(
+      / · idle 1h05$/,
+    )
   })
 
   test('model ids lose the claude- prefix and a date', () => {

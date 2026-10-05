@@ -628,6 +628,17 @@ export const chartModel = (
   }
 }
 
+/** Which of the chart's occasional marks it shows, so the legend lists only those. */
+export type LegendMarks = { dip: boolean; low: boolean; broke: boolean; gap: boolean; extension: boolean }
+
+export const legendMarks = (model: ChartModel): LegendMarks => ({
+  dip: model.bars.some(b => b.level === 'dip'),
+  low: model.bars.some(b => b.level === 'low'),
+  broke: model.bars.some(b => b.level === 'broke'),
+  gap: model.bars.some(b => b.gapMs !== null),
+  extension: model.extensionsAfter > 0 || model.bars.some(b => b.extensionsBefore > 0),
+})
+
 /** A model id as the readout names it: `claude-opus-5-5` reads `opus-5-5`. */
 export const shortModel = (model: string) => model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
 
@@ -647,7 +658,8 @@ export const readoutOf = (bar: ChartBar, s: Strings, isNarrow = false): string[]
   const head = line([
     `#${bar.number}`,
     formatTimeOfDay(sample.sentAt),
-    sample.idleMs === null ? null : r.idle(formatClock(sample.idleMs)),
+    // Past the hour, the chart's own `1h05` rather than a clock reading 65:00.
+    sample.idleMs === null ? null : r.idle(sample.idleMs < 3_600_000 ? formatClock(sample.idleMs) : formatGap(sample.idleMs)),
     bar.extensionsBefore === 0 ? null : r.extended(bar.extensionsBefore),
     bar.newModel === null ? null : `→ ${shortModel(bar.newModel)}`,
   ])
