@@ -233,8 +233,11 @@ export const register: Register = (on, options) => {
 
       if (config.toast) {
         const notice = strings.expiresIn(formatClock(countdown.leftMs))
-        const hint = hasBand && config.band !== 'off' ? strings.pressExtend : strings.runExtend(EXTEND_COMMAND)
-        $.ui.toast(config.onExpiring === 'notify' ? notice : `${notice} · ${hint}`)
+        const isBandOff = hasBand && config.band === 'off'
+        const hint = hasBand && !isBandOff ? strings.pressExtend : strings.runExtend(EXTEND_COMMAND)
+        // With the band off, nothing on screen leads to the panel: the toast does.
+        const panel = isBandOff ? ` · ${strings.openPanel(COMMAND)}` : ''
+        $.ui.toast(`${config.onExpiring === 'notify' ? notice : `${notice} · ${hint}`}${panel}`)
       }
     })
 
@@ -580,14 +583,19 @@ export const register: Register = (on, options) => {
           const picked = await read($, overrides)
           config = applyOverrides(base, picked)
           await $.store.set(OVERRIDES_STORE_KEY, picked)
+        } else {
+          const result = await $.config.set({ key: row.key, value })
 
-          return
+          if (result.deny !== undefined) {
+            $.ui.toast(s.settingFailed(result.deny))
+
+            return
+          }
         }
 
-        const result = await $.config.set({ key: row.key, value })
-
-        if (result.deny !== undefined) {
-          $.ui.toast(s.settingFailed(result.deny))
+        // Once the panel closes, nothing on screen leads back: say how.
+        if (field === 'band' && value === 'off') {
+          $.ui.toast(s.bandTurnedOff(COMMAND))
         }
       } catch (err) {
         $.ui.toast(s.settingFailed(String(err)))

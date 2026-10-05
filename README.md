@@ -25,7 +25,7 @@ Needs Claude Code 2.1.286 or later (function-hook plugins, an early-access API).
 - An **Extend** button when the cache is about to expire.
 - A red ⚠ when the cache broke; hover over it for the likely cause.
 - **Details** opens the side panel.
-- Don't want the band at all? Set **Band above the prompt** to **Off** in the side panel; the toasts still warn you.
+- Don't want the band at all? Set **Band above the prompt** to **Off** in the side panel; the toasts still warn you, and `/cache` opens the panel to turn it back on.
 
 **Side panel** (`/cache` or **Details**):
 

@@ -22,6 +22,10 @@ export type Strings = {
   pressExtend: string
   /** The same hint where there is no band to press: run the command. */
   runExtend: (command: string) => string
+  /** With the band off, where the details went. */
+  openPanel: (command: string) => string
+  /** Toasted on turning the band off: how to bring it back. */
+  bandTurnedOff: (command: string) => string
   extended: (k: string) => string
   autoExtended: (k: string) => string
   extendFailed: (reason: string) => string
@@ -101,6 +105,8 @@ export const STRINGS: Record<Language, Strings> = {
     expiresIn: clock => `Prompt cache expires in ${clock}`,
     pressExtend: 'press Extend on the bar to keep it',
     runExtend: command => `run /${command} to keep it`,
+    openPanel: command => `/${command} for details`,
+    bandTurnedOff: command => `Band off · run /${command} to turn it back on`,
     extended: k => `Cache extended (read ${k})`,
     autoExtended: k => `Cache extended automatically (read ${k})`,
     extendFailed: reason => `Couldn't extend the cache: ${reason}`,
@@ -168,6 +174,8 @@ export const STRINGS: Record<Language, Strings> = {
     expiresIn: clock => `快取將在 ${clock} 後過期`,
     pressExtend: '按橫條上的「延長」可保留',
     runExtend: command => `輸入 /${command} 可保留`,
+    openPanel: command => `輸入 /${command} 看詳細`,
+    bandTurnedOff: command => `已關閉橫條 · 輸入 /${command} 可重新開啟`,
     extended: k => `已延長快取（讀取 ${k}）`,
     autoExtended: k => `已自動延長快取（讀取 ${k}）`,
     extendFailed: reason => `無法延長快取：${reason}`,
