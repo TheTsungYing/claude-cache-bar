@@ -31,6 +31,7 @@ import {
   notePrint,
   parseCacheArgs,
   readConfig,
+  readoutOf,
   recentHits,
   shouldAutoExtend,
   summarize,
@@ -827,7 +828,9 @@ export const register: Register = (on, options) => {
                 chart,
                 `${chart.isCapped ? '≤ ' : ''}${formatTokens(Math.round(chart.top))}`,
                 s.chartRange(chartFirst, chartFirst + chart.bars.length - 1),
+                chart.bars.map(bar => readoutOf(bar, s)),
               )}
+              isInteractive
             />
             <Box flexDirection="row" gap={2} flexWrap="wrap">
               {/* Opaque swatches: the bars' see-through greys vanish as text. */}

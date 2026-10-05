@@ -11,6 +11,7 @@ import {
   countdownOf,
   formatClock,
   formatGap,
+  formatTimeOfDay,
   formatStatus,
   guessCauses,
   hitLevelOf,
@@ -20,6 +21,8 @@ import {
   parseCacheArgs,
   notePrint,
   readConfig,
+  readoutOf,
+  shortModel,
   shouldAutoExtend,
   ttlWhenSent,
   withOverride,
@@ -497,6 +500,37 @@ describe('panel chart', () => {
     expect(model.isCapped).toBe(true)
     expect([last.height, last.isClipped, last.isTtlKnown]).toEqual([1, true, true])
     expect(model.bars.filter(b => b.isClipped)).toHaveLength(1)
+  })
+
+  test('the readout tells when, after how much idle, and what it cost', () => {
+    const sentAt = new Date(2026, 9, 5, 14, 32, 5).getTime()
+    const previous = sample(sentAt - 130 * SECOND, 140_000, 1_000)
+    const s = after(previous, 130 * SECOND, 147_200, 1_800, { uncached: 3 })
+    const extensions = [extension(sentAt - MINUTE)]
+    const model = chartModel([previous, s], [], extensions, '5m', EMPTY_TTL, 40)
+
+    expect(readoutOf(model.bars[1]!, STRINGS['zh-TW'])).toEqual([
+      '#2 · 14:32:05 · 閒置 2:10 · 延長 ×1',
+      '等效 17.0k · 寫入 1.8k · 未命中 3 · 讀取 147.2k · 命中 98.8%',
+    ])
+  })
+
+  test('a guessed write weight reads ≈, a new model and a break say so', () => {
+    const s = sample(T0, 147_200, 1_800, { uncached: 3 })
+    const broke = after(s, 2 * MINUTE, 0, 148_000, { model: 'claude-haiku-4-5-20251001' })
+    const cause = { at: broke.sentAt, hitRate: 0, previousHitRate: 0.99, rewritten: 148_000, causes: ['model' as const] }
+    const model = chartModel([s, broke], [cause], [], 'auto', EMPTY_TTL, 40)
+    const en = STRINGS.en
+
+    expect(readoutOf(model.bars[0]!, en)[1]).toMatch(/^cost ≈17\.0k · /)
+    expect(readoutOf(model.bars[1]!, en)[0]).toMatch(/ · idle 2:00 · → haiku-4-5$/)
+    expect(readoutOf(model.bars[1]!, en)[1]).toBe(`break · rewrote 148.0k · likely: ${en.causes.model}`)
+  })
+
+  test('model ids lose the claude- prefix and a date', () => {
+    expect(shortModel('claude-opus-5-5')).toBe('opus-5-5')
+    expect(shortModel('claude-haiku-4-5-20251001')).toBe('haiku-4-5')
+    expect(formatTimeOfDay(new Date(2026, 0, 2, 3, 4, 5).getTime())).toBe('03:04:05')
   })
 
   test('idle gaps read in minutes, then hours', () => {

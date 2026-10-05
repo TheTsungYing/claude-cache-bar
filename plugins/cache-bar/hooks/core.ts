@@ -552,6 +552,7 @@ export const hitLevelOf = (s: CacheSample, isBreak: boolean): HitLevel => {
 export type ChartBar = {
   /** The request's number in this session, from 1. */
   number: number
+  sample: CacheSample
   cost: Cost
   /** Bar height over the scale's top, 0..1. */
   height: number
@@ -564,6 +565,10 @@ export type ChartBar = {
   gapMs: number | null
   /** Answered keep-warm forks since the request before this one. */
   extensionsBefore: number
+  /** The break this request caused, if it did. */
+  broke: CacheBreak | null
+  /** Its model, when it differs from the request before's; null otherwise. */
+  newModel: string | null
 }
 
 export type ChartModel = {
@@ -584,7 +589,7 @@ export const chartModel = (
   learned: TtlState,
   count: number,
 ): ChartModel => {
-  const broke = new Set(breaks.map(b => b.at))
+  const brokeAt = new Map(breaks.map(b => [b.at, b]))
   const kept = extensions.filter(x => x.isAnswered && x.read > 0)
   const start = Math.max(0, samples.length - count)
   const shown = samples.slice(start)
@@ -599,15 +604,18 @@ export const chartModel = (
 
     return {
       number: start + i + 1,
+      sample: s,
       cost,
       height: top === 0 ? 0 : Math.min(1, total / top),
       isClipped: total > top,
-      level: hitLevelOf(s, broke.has(s.sentAt)),
+      level: hitLevelOf(s, brokeAt.has(s.sentAt)),
       isLatest: i === shown.length - 1,
       isTtlKnown: ttls[i] !== null,
       gapMs: s.idleMs !== null && s.idleMs > GAP_MARK_MS ? s.idleMs : null,
       extensionsBefore:
         previous === undefined ? 0 : kept.filter(x => x.at > previous.sentAt && x.at <= s.sentAt).length,
+      broke: brokeAt.get(s.sentAt) ?? null,
+      newModel: previous !== undefined && previous.model !== s.model ? s.model : null,
     }
   })
   const latest = shown.at(-1)
@@ -618,6 +626,46 @@ export const chartModel = (
     isCapped,
     extensionsAfter: latest === undefined ? 0 : kept.filter(x => x.at > latest.sentAt).length,
   }
+}
+
+/** A model id as the readout names it: `claude-opus-5-5` reads `opus-5-5`. */
+export const shortModel = (model: string) => model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
+
+/**
+ * The chart's two readout lines for one request: when it was sent, after how
+ * much idle, any keep-warm forks and a model change; then what it cost, or
+ * the break it caused. `≈` marks a cost whose write weight is a guess.
+ */
+export const readoutOf = (bar: ChartBar, s: Strings): [string, string] => {
+  const r = s.readout
+  const sample = bar.sample
+  const head = [
+    `#${bar.number}`,
+    formatTimeOfDay(sample.sentAt),
+    sample.idleMs === null ? null : r.idle(formatClock(sample.idleMs)),
+    bar.extensionsBefore === 0 ? null : r.extended(bar.extensionsBefore),
+    bar.newModel === null ? null : `→ ${shortModel(bar.newModel)}`,
+  ]
+
+  if (bar.broke !== null) {
+    return [
+      head.filter(x => x !== null).join(' · '),
+      r.broke(formatTokens(bar.broke.rewritten), formatCauses(bar.broke.causes, s)),
+    ]
+  }
+
+  const cost = `${bar.isTtlKnown ? '' : '≈'}${formatTokens(Math.round(totalOf(bar.cost)))}`
+
+  return [
+    head.filter(x => x !== null).join(' · '),
+    [
+      `${r.cost} ${cost}`,
+      `${r.written} ${formatTokens(sample.written)}`,
+      `${r.uncached} ${formatTokens(sample.uncached)}`,
+      `${r.read} ${formatTokens(sample.read)}`,
+      `${r.hit} ${(hitRateOf(sample) * 100).toFixed(1)}%`,
+    ].join(' · '),
+  ]
 }
 
 // ---- Summary
@@ -652,6 +700,13 @@ export const summarize = (
 export const formatTokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 export const formatPercent = (rate: number) => `${Math.round(rate * 100)}%`
+
+/** Local wall-clock time, hh:mm:ss. */
+export const formatTimeOfDay = (ms: number) => {
+  const d = new Date(ms)
+
+  return [d.getHours(), d.getMinutes(), d.getSeconds()].map(x => String(x).padStart(2, '0')).join(':')
+}
 
 /** An idle gap as the chart labels it: `12m`, or `1h05` past the hour. */
 export const formatGap = (ms: number) => {

@@ -56,6 +56,17 @@ export type Strings = {
   chartAlt: string
   /** The requests the chart shows, by number: first and last. */
   chartRange: (first: number, last: number) => string
+  /** The chart's readout row: labels, and phrases taking formatted values. */
+  readout: {
+    cost: string
+    written: string
+    uncached: string
+    read: string
+    hit: string
+    idle: (clock: string) => string
+    extended: (count: number) => string
+    broke: (rewritten: string, causes: string) => string
+  }
   legend: {
     read: string
     written: string
@@ -149,6 +160,16 @@ export const STRINGS: Record<Language, Strings> = {
     chartTitle: 'Per request · token cost',
     chartAlt: 'cost of each request in uncached-token equivalents, with its hit rate and idle gaps',
     chartRange: (first, last) => `#${first}–${last}`,
+    readout: {
+      cost: 'cost',
+      written: 'write',
+      uncached: 'miss',
+      read: 'read',
+      hit: 'hit',
+      idle: clock => `idle ${clock}`,
+      extended: count => `extended ×${count}`,
+      broke: (rewritten, causes) => `break · rewrote ${rewritten} · likely: ${causes}`,
+    },
     legend: {
       read: 'read ×0.1',
       written: 'write',
@@ -230,6 +251,16 @@ export const STRINGS: Record<Language, Strings> = {
     chartTitle: '每次請求 · 等效 token',
     chartAlt: '每次請求的等效成本（以未命中 token 計），含命中率與閒置',
     chartRange: (first, last) => `第 ${first}–${last} 次`,
+    readout: {
+      cost: '等效',
+      written: '寫入',
+      uncached: '未命中',
+      read: '讀取',
+      hit: '命中',
+      idle: clock => `閒置 ${clock}`,
+      extended: count => `延長 ×${count}`,
+      broke: (rewritten, causes) => `失效 · 重寫 ${rewritten} · 可能原因：${causes}`,
+    },
     legend: {
       read: '讀取 ×0.1',
       written: '寫入',

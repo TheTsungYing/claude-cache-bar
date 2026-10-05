@@ -125,7 +125,7 @@ export const sparklineSvg = (points: readonly { rate: number; isBreak: boolean }
 
 /** The chart's markup size; the panel scales it to its width. */
 export const CHART_WIDTH = 520
-export const CHART_HEIGHT = 130
+export const CHART_HEIGHT = 178
 
 /** Bars the chart draws at most: the latest requests. */
 export const CHART_BARS = 40
@@ -140,22 +140,45 @@ const LEVEL_COLORS: Record<HitLevel, string> = {
 
 const escapeXml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-const label = (x: number, y: number, text: string, anchor: 'start' | 'end' = 'start') =>
-  `<text x="${n(x)}" y="${y}" font-family="sans-serif" font-size="10" fill="${COLORS.label}" text-anchor="${anchor}">${escapeXml(text)}</text>`
+const label = (x: number, y: number, text: string, size: number, anchor: 'start' | 'end' = 'start') =>
+  `<text x="${n(x)}" y="${y}" font-size="${size}" text-anchor="${anchor}">${escapeXml(text)}</text>`
+
+// The chart is drawn interactive, in a frame of its own, for its hover. The
+// frame paints white unless the document allows a dark scheme, so it does,
+// on a transparent ground. Hovering a bar shows its readout in place of the
+// latest one's; no script, only CSS.
+const CHART_STYLE =
+  '<style>' +
+  ':root{color-scheme:light dark}' +
+  'svg{background:transparent}' +
+  `text{font-family:sans-serif;fill:${COLORS.label}}` +
+  `.hit{fill:${COLORS.neutral};fill-opacity:0;pointer-events:all}` +
+  '.b:hover .hit{fill-opacity:.15}' +
+  '.r{visibility:hidden}' +
+  '.b:hover .r{visibility:visible}' +
+  'svg:has(.b:hover) .def{visibility:hidden}' +
+  '</style>'
 
 /**
  * One bar per request: its cost in uncached-token equivalents, stacked read /
  * written / uncached. A strip above colours each request's hit rate; a dashed
  * line and its length mark idle past 5 minutes, ▲ a keep-warm fork. A bar past
- * a capped scale's top ends in a chevron. `topLabel` and `rangeLabel` head it.
+ * a capped scale's top ends in a chevron. `topLabel` and `rangeLabel` head it;
+ * below it, the latest request's `readouts` line, or the hovered one's.
  */
-export const chartSvg = (model: ChartModel, topLabel: string, rangeLabel: string) => {
+export const chartSvg = (
+  model: ChartModel,
+  topLabel: string,
+  rangeLabel: string,
+  readouts: readonly (readonly [string, string])[],
+) => {
   const left = 4
   const right = CHART_WIDTH - 4
-  const stripY = 15
-  const top = 27
-  const bottom = 114
-  const marksY = 126
+  const stripY = 18
+  const top = 30
+  const bottom = 116
+  const marksY = 128
+  const readoutY = [151, 171]
   const plot = bottom - top
   const slot = (right - left) / Math.max(model.bars.length, 12)
   const barWidth = Math.max(1, slot * 0.55)
@@ -177,9 +200,15 @@ export const chartSvg = (model: ChartModel, topLabel: string, rangeLabel: string
 
     labelEnd = x + text.length * 6 + 4
 
-    return line + (isEnd ? label(right, marksY, text, 'end') : label(x + 1, marksY, text))
+    return line + (isEnd ? label(right, marksY, text, 10, 'end') : label(x + 1, marksY, text, 10))
   }
 
+  const readout = (lines: readonly [string, string] | undefined, className: string) =>
+    lines === undefined
+      ? ''
+      : `<g class="${className}">${lines.map((line, j) => label(left, readoutY[j] ?? 0, line, 14)).join('')}</g>`
+
+  const marks: string[] = []
   const bars = model.bars
     .map((b, i) => {
       const x = left + i * slot
@@ -201,22 +230,37 @@ export const chartSvg = (model: ChartModel, topLabel: string, rangeLabel: string
         ? `<path d="M${n(middle - 3)} ${top - 2}L${middle} ${top - 5}L${n(middle + 3)} ${top - 2}" fill="none" stroke="${COLORS.neutral}" stroke-width="1.2"/>`
         : ''
 
+      marks.push(mark(x, b.gapMs, b.extensionsBefore))
+
+      // The hover target spans the bar's column, strip to axis.
       return (
-        mark(x, b.gapMs, b.extensionsBefore) +
+        '<g class="b">' +
+        `<rect class="hit" x="${n(x)}" y="${stripY - 2}" width="${n(slot)}" height="${bottom - stripY + 4}"/>` +
         `<rect x="${n(x + 0.5)}" y="${stripY}" width="${n(slot - 1)}" height="4" fill="${LEVEL_COLORS[b.level]}"/>` +
         part(b.cost.read, b.isLatest ? COLORS.neutral : COLORS.read) +
         part(b.cost.written, COLORS.written) +
         part(b.cost.uncached, COLORS.uncached) +
-        chevron
+        chevron +
+        readout(readouts[i], 'r') +
+        '</g>'
       )
     })
     .join('')
 
-  const trailing = mark(left + model.bars.length * slot, null, model.extensionsAfter, true)
+  marks.push(mark(left + model.bars.length * slot, null, model.extensionsAfter, true))
   const axis = `<line x1="${left}" y1="${bottom}" x2="${right}" y2="${bottom}" stroke="${COLORS.track}" stroke-width="1"/>`
-  const heads = label(left, 10, topLabel) + label(right, 10, rangeLabel, 'end')
+  const heads = label(left, 12, topLabel, 12) + label(right, 12, rangeLabel, 12, 'end')
 
-  return svg(CHART_WIDTH, CHART_HEIGHT, axis + bars + trailing + heads)
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="xMinYMin meet">` +
+    CHART_STYLE +
+    axis +
+    marks.join('') +
+    heads +
+    readout(readouts.at(-1), 'def') +
+    bars +
+    '</svg>'
+  )
 }
 
 /** Font sizes of the band's clock and the panel's. */
