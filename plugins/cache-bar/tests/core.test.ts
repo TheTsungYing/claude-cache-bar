@@ -513,6 +513,11 @@ describe('panel chart', () => {
       '#2 · 14:32:05 · 閒置 2:10 · 延長 ×1',
       '等效 17.0k · 寫入 1.8k · 未命中 3 · 讀取 147.2k · 命中 98.8%',
     ])
+    expect(readoutOf(model.bars[1]!, STRINGS['zh-TW'], true)).toEqual([
+      '#2 · 14:32:05 · 閒置 2:10 · 延長 ×1',
+      '等效 17.0k · 命中 98.8%',
+      '寫入 1.8k · 未命中 3 · 讀取 147.2k',
+    ])
   })
 
   test('a guessed write weight reads ≈, a new model and a break say so', () => {
@@ -525,6 +530,7 @@ describe('panel chart', () => {
     expect(readoutOf(model.bars[0]!, en)[1]).toMatch(/^cost ≈17\.0k · /)
     expect(readoutOf(model.bars[1]!, en)[0]).toMatch(/ · idle 2:00 · → haiku-4-5$/)
     expect(readoutOf(model.bars[1]!, en)[1]).toBe(`break · rewrote 148.0k · likely: ${en.causes.model}`)
+    expect(readoutOf(model.bars[1]!, en, true).slice(1)).toEqual(['break · rewrote 148.0k', `likely: ${en.causes.model}`])
   })
 
   test('model ids lose the claude- prefix and a date', () => {

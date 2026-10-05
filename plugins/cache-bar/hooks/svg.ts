@@ -123,12 +123,13 @@ export const sparklineSvg = (points: readonly { rate: number; isBreak: boolean }
   return svg(SPARK_WIDTH, SPARK_HEIGHT, baseline + line + dots)
 }
 
-/** The chart's markup size; the panel scales it to its width. */
-export const CHART_WIDTH = 520
-export const CHART_HEIGHT = 178
+/** The chart's height with a two-line readout; each further line adds `READOUT_LINE`. */
+export const CHART_HEIGHT = 172
+const READOUT_LINE = 17
 
-/** Bars the chart draws at most: the latest requests. */
+/** Bars the chart draws at most: the latest requests; fewer in a narrow panel. */
 export const CHART_BARS = 40
+export const NARROW_CHART_BARS = 20
 
 /** The hit-rate strip's colours: grey while all is well. */
 const LEVEL_COLORS: Record<HitLevel, string> = {
@@ -140,8 +141,11 @@ const LEVEL_COLORS: Record<HitLevel, string> = {
 
 const escapeXml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-const label = (x: number, y: number, text: string, size: number, anchor: 'start' | 'end' = 'start') =>
-  `<text x="${n(x)}" y="${y}" font-size="${size}" text-anchor="${anchor}">${escapeXml(text)}</text>`
+/** A percentage of the chart's width, as an SVG length. */
+const pct = (x: number) => `${n(x)}%`
+
+const label = (x: string, y: number, text: string, size: number, anchor: 'start' | 'end' = 'start', dx = 0) =>
+  `<text x="${x}" y="${y}"${dx === 0 ? '' : ` dx="${dx}"`} font-size="${size}" text-anchor="${anchor}">${escapeXml(text)}</text>`
 
 // The chart is drawn interactive, in a frame of its own, for its hover. The
 // frame paints white unless the document allows a dark scheme, so it does,
@@ -164,24 +168,31 @@ const CHART_STYLE =
  * written / uncached. A strip above colours each request's hit rate; a dashed
  * line and its length mark idle past 5 minutes, ▲ a keep-warm fork. A bar past
  * a capped scale's top ends in a chevron. `topLabel` and `rangeLabel` head it;
- * below it, the latest request's `readouts` line, or the hovered one's.
+ * below it, the latest request's `readouts` lines, or the hovered one's.
+ *
+ * It fills the frame's width and keeps its height: across, everything is laid
+ * out in percentages, so the bars stretch and the text keeps its size.
+ * `widthPx` is a guess at that width, used only to keep mark labels apart.
+ * Returns the markup and its height in pixels.
  */
 export const chartSvg = (
   model: ChartModel,
   topLabel: string,
   rangeLabel: string,
-  readouts: readonly (readonly [string, string])[],
+  readouts: readonly (readonly string[])[],
+  widthPx: number,
 ) => {
-  const left = 4
-  const right = CHART_WIDTH - 4
+  const lines = Math.max(2, ...readouts.map(r => r.length))
+  const height = CHART_HEIGHT + (lines - 2) * READOUT_LINE
   const stripY = 18
   const top = 30
   const bottom = 116
   const marksY = 128
-  const readoutY = [151, 171]
   const plot = bottom - top
-  const slot = (right - left) / Math.max(model.bars.length, 12)
-  const barWidth = Math.max(1, slot * 0.55)
+  // Percent of the width: an edge margin, and each request's slot.
+  const edge = 0.8
+  const slot = (100 - 2 * edge) / Math.max(model.bars.length, 12)
+  const barWidth = slot * 0.55
   // Marks below the axis skip a label that would run into the one before.
   let labelEnd = Number.NEGATIVE_INFINITY
 
@@ -189,45 +200,44 @@ export const chartSvg = (
     const line =
       gapMs === null
         ? ''
-        : `<line x1="${n(x)}" y1="${top - 2}" x2="${n(x)}" y2="${bottom}" stroke="${COLORS.label}" stroke-width="1" stroke-dasharray="2 3"/>`
+        : `<line x1="${pct(x)}" y1="${top - 2}" x2="${pct(x)}" y2="${bottom}" stroke="${COLORS.label}" stroke-width="1" stroke-dasharray="2 3"/>`
     const text = [gapMs === null ? '' : formatGap(gapMs), extensions === 0 ? '' : '▲'.repeat(Math.min(extensions, 3))]
       .filter(t => t !== '')
       .join(' ')
+    const xPx = (x / 100) * widthPx
 
-    if (text === '' || x < labelEnd) {
+    if (text === '' || xPx < labelEnd) {
       return line
     }
 
-    labelEnd = x + text.length * 6 + 4
+    labelEnd = xPx + text.length * 6 + 4
 
-    return line + (isEnd ? label(right, marksY, text, 10, 'end') : label(x + 1, marksY, text, 10))
+    return line + (isEnd ? label('100%', marksY, text, 10, 'end', -4) : label(pct(x), marksY, text, 10, 'start', 1))
   }
 
-  const readout = (lines: readonly [string, string] | undefined, className: string) =>
-    lines === undefined
+  const readout = (rows: readonly string[] | undefined, className: string) =>
+    rows === undefined
       ? ''
-      : `<g class="${className}">${lines.map((line, j) => label(left, readoutY[j] ?? 0, line, 14)).join('')}</g>`
+      : `<g class="${className}">${rows.map((row, j) => label('4', 148 + j * READOUT_LINE, row, 12)).join('')}</g>`
 
   const marks: string[] = []
   const bars = model.bars
     .map((b, i) => {
-      const x = left + i * slot
-      const barX = n(x + (slot - barWidth) / 2)
+      const x = edge + i * slot
+      const barX = pct(x + (slot - barWidth) / 2)
       const total = b.cost.read + b.cost.written + b.cost.uncached
       // Clipped bars keep their mix: each part shrinks with the whole.
       const scale = total === 0 ? 0 : (b.height * plot) / total
       let base = bottom
       const part = (amount: number, color: string) => {
-        const height = amount * scale
-        base -= height
+        const h = amount * scale
+        base -= h
 
-        return height <= 0
-          ? ''
-          : `<rect x="${barX}" y="${n(base)}" width="${n(barWidth)}" height="${n(height)}" fill="${color}"/>`
+        return h <= 0 ? '' : `<rect x="${barX}" y="${n(base)}" width="${pct(barWidth)}" height="${n(h)}" fill="${color}"/>`
       }
-      const middle = n(x + slot / 2)
+      // A path takes no percentages, so the chevron sits in a nested svg placed by one.
       const chevron = b.isClipped
-        ? `<path d="M${n(middle - 3)} ${top - 2}L${middle} ${top - 5}L${n(middle + 3)} ${top - 2}" fill="none" stroke="${COLORS.neutral}" stroke-width="1.2"/>`
+        ? `<svg x="${pct(x + slot / 2)}" y="${top - 5}" overflow="visible"><path d="M-3 3L0 0L3 3" fill="none" stroke="${COLORS.neutral}" stroke-width="1.2"/></svg>`
         : ''
 
       marks.push(mark(x, b.gapMs, b.extensionsBefore))
@@ -235,8 +245,8 @@ export const chartSvg = (
       // The hover target spans the bar's column, strip to axis.
       return (
         '<g class="b">' +
-        `<rect class="hit" x="${n(x)}" y="${stripY - 2}" width="${n(slot)}" height="${bottom - stripY + 4}"/>` +
-        `<rect x="${n(x + 0.5)}" y="${stripY}" width="${n(slot - 1)}" height="4" fill="${LEVEL_COLORS[b.level]}"/>` +
+        `<rect class="hit" x="${pct(x)}" y="${stripY - 2}" width="${pct(slot)}" height="${bottom - stripY + 4}"/>` +
+        `<rect x="${pct(x + slot * 0.05)}" y="${stripY}" width="${pct(slot * 0.9)}" height="4" fill="${LEVEL_COLORS[b.level]}"/>` +
         part(b.cost.read, b.isLatest ? COLORS.neutral : COLORS.read) +
         part(b.cost.written, COLORS.written) +
         part(b.cost.uncached, COLORS.uncached) +
@@ -247,12 +257,12 @@ export const chartSvg = (
     })
     .join('')
 
-  marks.push(mark(left + model.bars.length * slot, null, model.extensionsAfter, true))
-  const axis = `<line x1="${left}" y1="${bottom}" x2="${right}" y2="${bottom}" stroke="${COLORS.track}" stroke-width="1"/>`
-  const heads = label(left, 12, topLabel, 12) + label(right, 12, rangeLabel, 12, 'end')
+  marks.push(mark(edge + model.bars.length * slot, null, model.extensionsAfter, true))
+  const axis = `<line x1="${pct(edge)}" y1="${bottom}" x2="${pct(100 - edge)}" y2="${bottom}" stroke="${COLORS.track}" stroke-width="1"/>`
+  const heads = label('4', 12, topLabel, 12) + label('100%', 12, rangeLabel, 12, 'end', -4)
 
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 ${CHART_WIDTH} ${CHART_HEIGHT}" preserveAspectRatio="xMinYMin meet">` +
+  const source =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${height}">` +
     CHART_STYLE +
     axis +
     marks.join('') +
@@ -260,7 +270,8 @@ export const chartSvg = (
     readout(readouts.at(-1), 'def') +
     bars +
     '</svg>'
-  )
+
+  return { source, height }
 }
 
 /** Font sizes of the band's clock and the panel's. */

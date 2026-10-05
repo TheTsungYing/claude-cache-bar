@@ -65,7 +65,9 @@ export type Strings = {
     hit: string
     idle: (clock: string) => string
     extended: (count: number) => string
-    broke: (rewritten: string, causes: string) => string
+    broke: string
+    rewrote: (tokens: string) => string
+    likely: (causes: string) => string
   }
   legend: {
     read: string
@@ -168,7 +170,9 @@ export const STRINGS: Record<Language, Strings> = {
       hit: 'hit',
       idle: clock => `idle ${clock}`,
       extended: count => `extended ×${count}`,
-      broke: (rewritten, causes) => `break · rewrote ${rewritten} · likely: ${causes}`,
+      broke: 'break',
+      rewrote: tokens => `rewrote ${tokens}`,
+      likely: causes => `likely: ${causes}`,
     },
     legend: {
       read: 'read ×0.1',
@@ -259,7 +263,9 @@ export const STRINGS: Record<Language, Strings> = {
       hit: '命中',
       idle: clock => `閒置 ${clock}`,
       extended: count => `延長 ×${count}`,
-      broke: (rewritten, causes) => `失效 · 重寫 ${rewritten} · 可能原因：${causes}`,
+      broke: '失效',
+      rewrote: tokens => `重寫 ${tokens}`,
+      likely: causes => `可能原因：${causes}`,
     },
     legend: {
       read: '讀取 ×0.1',

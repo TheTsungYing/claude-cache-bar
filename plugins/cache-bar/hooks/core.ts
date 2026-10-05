@@ -631,41 +631,50 @@ export const chartModel = (
 /** A model id as the readout names it: `claude-opus-5-5` reads `opus-5-5`. */
 export const shortModel = (model: string) => model.replace(/^claude-/, '').replace(/-\d{8}$/, '')
 
+/** Below this many body columns the panel is narrow: fewer bars, a three-line readout. */
+export const NARROW_COLUMNS = 50
+
 /**
- * The chart's two readout lines for one request: when it was sent, after how
+ * The chart's readout lines for one request: when it was sent, after how
  * much idle, any keep-warm forks and a model change; then what it cost, or
- * the break it caused. `≈` marks a cost whose write weight is a guess.
+ * the break it caused. `≈` marks a cost whose write weight is a guess. Two
+ * lines, or three when `isNarrow`, the second one split where it would not fit.
  */
-export const readoutOf = (bar: ChartBar, s: Strings): [string, string] => {
+export const readoutOf = (bar: ChartBar, s: Strings, isNarrow = false): string[] => {
   const r = s.readout
   const sample = bar.sample
-  const head = [
+  const line = (parts: readonly (string | null)[]) => parts.filter(x => x !== null).join(' · ')
+  const head = line([
     `#${bar.number}`,
     formatTimeOfDay(sample.sentAt),
     sample.idleMs === null ? null : r.idle(formatClock(sample.idleMs)),
     bar.extensionsBefore === 0 ? null : r.extended(bar.extensionsBefore),
     bar.newModel === null ? null : `→ ${shortModel(bar.newModel)}`,
-  ]
+  ])
+  const [first, second] =
+    bar.broke !== null
+      ? [
+          [r.broke, r.rewrote(formatTokens(bar.broke.rewritten))],
+          [r.likely(formatCauses(bar.broke.causes, s))],
+        ]
+      : [
+          [
+            `${r.cost} ${bar.isTtlKnown ? '' : '≈'}${formatTokens(Math.round(totalOf(bar.cost)))}`,
+            `${r.hit} ${(hitRateOf(sample) * 100).toFixed(1)}%`,
+          ],
+          [
+            `${r.written} ${formatTokens(sample.written)}`,
+            `${r.uncached} ${formatTokens(sample.uncached)}`,
+            `${r.read} ${formatTokens(sample.read)}`,
+          ],
+        ]
 
-  if (bar.broke !== null) {
-    return [
-      head.filter(x => x !== null).join(' · '),
-      r.broke(formatTokens(bar.broke.rewritten), formatCauses(bar.broke.causes, s)),
-    ]
+  if (isNarrow) {
+    return [head, line(first), line(second)]
   }
 
-  const cost = `${bar.isTtlKnown ? '' : '≈'}${formatTokens(Math.round(totalOf(bar.cost)))}`
-
-  return [
-    head.filter(x => x !== null).join(' · '),
-    [
-      `${r.cost} ${cost}`,
-      `${r.written} ${formatTokens(sample.written)}`,
-      `${r.uncached} ${formatTokens(sample.uncached)}`,
-      `${r.read} ${formatTokens(sample.read)}`,
-      `${r.hit} ${(hitRateOf(sample) * 100).toFixed(1)}%`,
-    ].join(' · '),
-  ]
+  // One line: the hit rate goes last, after the token split it comes from.
+  return [head, bar.broke !== null ? line([...first, ...second]) : line([first[0]!, ...second, first[1]!])]
 }
 
 // ---- Summary

@@ -9,6 +9,7 @@ import {
   LANGUAGES,
   MAX_EVENTS,
   MAX_SAMPLES,
+  NARROW_COLUMNS,
   NO_OVERRIDES,
   anchorOf,
   appendCapped,
@@ -48,6 +49,7 @@ import {
   CHART_BARS,
   CLOCK_SIZE,
   COLORS,
+  NARROW_CHART_BARS,
   RING_SIZE,
   SPARK_HEIGHT,
   SPARK_WIDTH,
@@ -749,8 +751,25 @@ export const register: Register = (on, options) => {
 
     const canExtend = !isWorking && countdown.phase === 'alert' && config.onExpiring !== 'notify'
     const summary = summarize(list, breakList, extensionList)
-    const chart = chartModel(list, breakList, extensionList, config.ttlMode, learned, CHART_BARS)
+    // A narrow panel gets fewer, wider bars and a three-line readout. Its
+    // width comes in cells; ~8.7px each on desktop, a guess only for spacing.
+    const isNarrow = e.props.bodyColumns < NARROW_COLUMNS
+    const chart = chartModel(
+      list,
+      breakList,
+      extensionList,
+      config.ttlMode,
+      learned,
+      isNarrow ? NARROW_CHART_BARS : CHART_BARS,
+    )
     const chartFirst = chart.bars[0]?.number ?? 0
+    const chartDrawing = chartSvg(
+      chart,
+      `${chart.isCapped ? '≤ ' : ''}${formatTokens(Math.round(chart.top))}`,
+      s.chartRange(chartFirst, chartFirst + chart.bars.length - 1),
+      chart.bars.map(bar => readoutOf(bar, s, isNarrow)),
+      e.props.bodyColumns * 8.7,
+    )
     // The request an extension kept warm: the last one sent before it.
     const idleSince = (at: number) => [...list].reverse().find(x => x.sentAt < at)?.sentAt ?? null
     const numberOf = (sentAt: number) => {
@@ -821,17 +840,7 @@ export const register: Register = (on, options) => {
         {Svg === null ? null : (
           <Box flexDirection="column">
             {title(s.chartTitle)}
-            <Svg
-              key="chart"
-              alt={s.chartAlt}
-              source={chartSvg(
-                chart,
-                `${chart.isCapped ? '≤ ' : ''}${formatTokens(Math.round(chart.top))}`,
-                s.chartRange(chartFirst, chartFirst + chart.bars.length - 1),
-                chart.bars.map(bar => readoutOf(bar, s)),
-              )}
-              isInteractive
-            />
+            <Svg key="chart" alt={s.chartAlt} source={chartDrawing.source} height={chartDrawing.height} isInteractive />
             <Box flexDirection="row" gap={2} flexWrap="wrap">
               {/* Opaque swatches: the bars' see-through greys vanish as text. */}
               {swatch(COLORS.neutral, '■', s.legend.read)}
