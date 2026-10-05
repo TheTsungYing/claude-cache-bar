@@ -17,22 +17,23 @@ Needs Claude Code 2.1.286 or later (function-hook plugins, an early-access API).
 
 ## What you get
 
-**Desktop (Code tab)**: a band above the prompt.
+**Desktop (Code tab)**: a compact, one-row band above the prompt. It stays quiet while the cache is fine and adds color only when something needs you.
 
-- A countdown ring and clock for the cache TTL. Green, then yellow and blinking at 20% left, then red at 10%, then a dashed red ring once expired, with what the next request will rewrite.
-- Last request's hit rate, the context size, and a hit-rate trend line.
-- A spinner while Claude is answering (each request refreshes the cache).
+- A small countdown ring and clock for the cache TTL. Grey while fresh, orange at 20% left, red at 10%, a dashed grey ring once expired. Nothing blinks.
+- Hover over the band for the last request's hit rate, the context size and a hit-rate trend line (and, once expired, what the next request will rewrite).
+- While Claude is answering, the ring holds still and the clock shows `…`: each request refreshes the cache.
 - An **Extend** button when the cache is about to expire.
-- A cache-break warning with its likely cause.
+- A red ⚠ when the cache broke; hover over it for the likely cause.
 - **Details** opens the side panel.
+- Don't want the band at all? Set **Band above the prompt** to **Off** in the side panel; the toasts still warn you.
 
 **Side panel** (`/cache` or **Details**):
 
-- The countdown, large, with the TTL mode and how it was detected.
+- The countdown, with the TTL, last hit rate and context on one line.
 - This conversation: average hit rate, requests, breaks, extensions, peak context.
-- A per-request chart: stacked bars for cache read / write / miss, the hit-rate line, red dots on breaks.
-- The list of cache breaks with their likely causes, and the extensions made.
-- Quick settings for what happens near expiry and the TTL mode.
+- A per-request chart: stacked bars for cache read / write / miss, with writes (what costs) in orange, the hit-rate line, and red dots on breaks.
+- The list of cache breaks with their likely causes, and the extensions made; one line when there are none.
+- Quick settings for what happens near expiry, the TTL mode (with how it was detected) and the band.
 
 **Terminal and VS Code**: one status line.
 
@@ -76,14 +77,15 @@ Likely causes: idle past the TTL, a model switch, a compaction, a change to the 
 
 ## Settings
 
-Each one is a row in `/config`. The side panel's quick settings change `onExpiring` and `ttlMode` too.
+Each one is a row in `/config`. The side panel's quick settings change `onExpiring`, `ttlMode` and `band` too.
 
 | Setting | Values | Default | |
 |---|---|---|---|
 | `language` | `en`, `zh-TW` | `en` | Display language |
 | `ttlMode` | `auto`, `5m`, `1h` | `auto` | Cache TTL |
 | `onExpiring` | `notify`, `button`, `auto` | `button` | Notify only; notify and offer Extend; extend automatically |
-| `warnAtPercent` | 1–99 | 20 | Turn yellow at this % of the TTL left |
+| `band` | `compact`, `off` | `compact` | Desktop band above the prompt; `off` leaves only the toasts |
+| `warnAtPercent` | 1–99 | 20 | Turn orange at this % of the TTL left |
 | `alertAtPercent` | 1–99 | 10 | Notify (and offer Extend) at this % left |
 | `toast` | on / off | on | Show a toast before the cache expires |
 | `autoExtendMaxPerIdle` | 0–100 | 3 | Auto-extend at most this many times while you are away |
