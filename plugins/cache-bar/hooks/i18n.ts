@@ -73,10 +73,18 @@ export type Strings = {
   ttlModeOptions: Record<TtlMode, string>
   bandLabel: string
   bandOptions: Record<BandMode, string>
+  languageLabel: string
+  /** `/cache lang` done: `name` is the language's own name. */
+  languageSet: (name: string) => string
+  /** `/cache` with arguments it doesn't know. */
+  cacheUsage: (command: string) => string
   settingFailed: (reason: string) => string
   /** When an extension ran: `clock` idle since the last request. */
   idleAt: (clock: string) => string
 }
+
+/** Each language in its own words, so the one you can read is always findable. */
+export const LANGUAGE_NAMES: Record<Language, string> = { en: 'English', 'zh-TW': '繁體中文' }
 
 const ttl = (mode: TtlMode, value: Ttl) => (mode === 'auto' ? `auto→${value}` : value)
 
@@ -114,7 +122,7 @@ export const STRINGS: Record<Language, Strings> = {
     ringAlt: 'cache TTL countdown',
     sparkAlt: 'hit rate per request',
     paneTitle: 'Prompt cache',
-    commandDescription: 'Open the prompt cache panel',
+    commandDescription: 'Open the prompt cache panel (lang en|zh-TW switches the language)',
     extendCommandDescription: 'Keep the prompt cache warm now',
     extendNothing: 'Nothing is cached yet: no request has been sent',
     extendBusy: 'Claude is answering: each request refreshes the cache',
@@ -147,6 +155,9 @@ export const STRINGS: Record<Language, Strings> = {
     ttlModeOptions: { auto: 'Auto-detect', '5m': '5 minutes', '1h': '1 hour' },
     bandLabel: 'Band above the prompt',
     bandOptions: { compact: 'Compact', off: 'Off' },
+    languageLabel: 'Language',
+    languageSet: name => `Language: ${name}`,
+    cacheUsage: command => `/${command} opens the panel · /${command} lang en|zh-TW switches the language`,
     settingFailed: reason => `Couldn't change the setting: ${reason}`,
     idleAt: clock => `${clock} idle`,
   },
@@ -156,42 +167,42 @@ export const STRINGS: Record<Language, Strings> = {
     hit: '命中',
     context: '上下文',
     requests: '請求',
-    breaks: '斷掉',
+    breaks: '失效',
     ttl,
     causes: {
       idle: '閒置超過 TTL',
       model: '剛換模型',
-      compact: '剛 compact',
+      compact: '剛執行 compact',
       system: 'system prompt 或 CLAUDE.md 變動',
       tools: '工具清單變動',
     },
     unknownCause: '原因不明',
     working: '回覆中',
-    extend: k => `延長 · ~${k} 讀取`,
+    extend: k => `延長（約讀取 ${k}）`,
     extendShort: '延長',
     extending: '延長中…',
     rewriteNext: k => `下次請求將重寫 ${k}`,
     expiresIn: clock => `快取將在 ${clock} 後過期`,
-    pressExtend: '按橫條上的「延長」可保留',
-    runExtend: command => `輸入 /${command} 可保留`,
-    openPanel: command => `輸入 /${command} 看詳細`,
+    pressExtend: '按橫條上的「延長」即可保留',
+    runExtend: command => `輸入 /${command} 即可保留`,
+    openPanel: command => `輸入 /${command} 查看詳細資訊`,
     bandTurnedOff: command => `已關閉橫條 · 輸入 /${command} 可重新開啟`,
     extended: k => `已延長快取（讀取 ${k}）`,
     autoExtended: k => `已自動延長快取（讀取 ${k}）`,
     extendFailed: reason => `無法延長快取：${reason}`,
-    broke: causes => `快取斷掉：${causes}`,
+    broke: causes => `快取失效：${causes}`,
     ringAlt: '快取 TTL 倒數',
     sparkAlt: '每次請求的命中率',
     paneTitle: 'Prompt 快取',
-    commandDescription: '開啟 prompt 快取面板',
+    commandDescription: '開啟 prompt 快取面板（lang en|zh-TW 切換語言）',
     extendCommandDescription: '立即延長 prompt 快取',
     extendNothing: '還沒有送出請求，沒有可延長的快取',
     extendBusy: '回覆中：每次請求都會讓快取重新計時',
     extendAlready: '正在延長快取',
-    details: '詳細',
+    details: '詳細資訊',
     paneUnplaced: reason => `無法開啟快取面板：${reason}`,
     ttlLearned: (value, minutes) => `判定為 ${value}：閒置 ${minutes} 分鐘後仍命中`,
-    ttlAssumed: '先當 5m，閒置超過 5 分鐘後仍命中才判定為 1h',
+    ttlAssumed: '暫定 5m，閒置超過 5 分鐘仍命中即改判為 1h',
     lastHit: '上次命中',
     summaryTitle: '本次對話',
     averageHit: '平均命中',
@@ -199,13 +210,13 @@ export const STRINGS: Record<Language, Strings> = {
     peakContext: '最大上下文',
     chartTitle: '每次請求',
     chartAlt: '每次請求的快取讀取、寫入、未命中與命中率',
-    legend: { read: '讀取', written: '寫入', uncached: '未命中', rate: '命中率', broke: '斷掉' },
-    breaksTitle: '快取斷掉',
+    legend: { read: '讀取', written: '寫入', uncached: '未命中', rate: '命中率', broke: '失效' },
+    breaksTitle: '快取失效',
     noBreaks: '無',
     breakLine: (n, before, after, k) => `${n === null ? '' : `第 ${n} 次請求 · `}${before} → ${after} · 重寫 ${k}`,
     extensionsTitle: '延長紀錄',
     noExtensions: '無',
-    quietHistory: '無斷掉 · 無延長',
+    quietHistory: '未失效 · 未延長',
     trigger: { manual: '手動', auto: '自動' },
     extensionRead: k => `讀取 ${k}`,
     extensionFailed: reason => `失敗：${reason}`,
@@ -216,6 +227,9 @@ export const STRINGS: Record<Language, Strings> = {
     ttlModeOptions: { auto: '自動偵測', '5m': '5 分鐘', '1h': '1 小時' },
     bandLabel: '輸入框上方橫條',
     bandOptions: { compact: '精簡', off: '關閉' },
+    languageLabel: '語言',
+    languageSet: name => `語言：${name}`,
+    cacheUsage: command => `/${command} 開啟面板 · /${command} lang en|zh-TW 切換語言`,
     settingFailed: reason => `無法變更設定：${reason}`,
     idleAt: clock => `閒置 ${clock} 時`,
   },

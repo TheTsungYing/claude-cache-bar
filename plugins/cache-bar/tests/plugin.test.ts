@@ -21,6 +21,9 @@ const EXTEND = {
   presentation: { isFullscreen: false, columns: 80 },
 }
 
+/** `/cache` typed at the prompt with `args`. */
+const cache = (args: string) => ({ ...EXTEND, command: 'cache', args })
+
 /** Beneath the plugin: a clock, a store, and what it shows on the status line. */
 const world = (on: On) => {
   const clock = mock.clock(on, { now: T0 })
@@ -35,6 +38,9 @@ const world = (on: On) => {
     return { value: undefined }
   })
   on('ui.toast', async () => ({ value: undefined }))
+  on('ui.panes', async () => ({ value: [] }))
+  // A plugin folder: no settings rows, so picks are kept as overrides.
+  on('config.list', async () => ({ value: [] }))
   on('model.fork', async ($, e) => {
     forks.push(e.prompt)
     const usage = { ...USAGE, cache_creation_input_tokens: 0, output_tokens: 4 }
@@ -89,6 +95,30 @@ test('/cache-extend forks the main thread and restarts the countdown', { options
 
 test('zh-TW speaks Traditional Chinese', { options: { language: 'zh-TW' } }, async ($, on) => {
   world(on)
+  await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run(EXTEND)).text).toBe('還沒有送出請求，沒有可延長的快取')
+})
+
+test('/cache lang switches the language on the spot', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+
+  expect((await $.command.run(cache('lang zh-TW'))).text).toBe('語言：繁體中文')
+  expect((await $.command.run(EXTEND)).text).toBe('還沒有送出請求，沒有可延長的快取')
+
+  expect((await $.command.run(cache('lang'))).text).toBe('Language: English')
+  expect((await $.command.run(EXTEND)).text).toBe('Nothing is cached yet: no request has been sent')
+
+  expect((await $.command.run(cache('lang fr'))).text).toBe(
+    '/cache opens the panel · /cache lang en|zh-TW switches the language',
+  )
+})
+
+test('session.start keeps a language picked with /cache lang', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
+  await $.command.run(cache('lang zh'))
   await $.session.start({ cwd: '.', surface: 'terminal', isInteractive: true })
 
   expect((await $.command.run(EXTEND)).text).toBe('還沒有送出請求，沒有可延長的快取')

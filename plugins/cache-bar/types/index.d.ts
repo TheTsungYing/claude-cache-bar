@@ -13,9 +13,9 @@ export type OnExpiring = 'notify' | 'button' | 'auto'
 export type BandMode = 'compact' | 'off'
 
 /**
- * A setting picked in the panel where `$.config` has no row for it (a plugin
- * folder on desktop). It stands while the `userConfig` value it replaced,
- * `over`, is unchanged: a later change in settings wins.
+ * A setting picked in the panel or with `/cache lang` where `$.config` has
+ * no row for it (a plugin folder on desktop). It stands while the `userConfig`
+ * value it replaced, `over`, is unchanged: a later change in settings wins.
  */
 export type Override<T> = { value: T; over: T }
 
@@ -23,6 +23,7 @@ export type Overrides = {
   onExpiring: Override<OnExpiring> | null
   ttlMode: Override<TtlMode> | null
   band: Override<BandMode> | null
+  language: Override<Language> | null
 }
 
 /** One main-thread model request's prompt cache usage. */

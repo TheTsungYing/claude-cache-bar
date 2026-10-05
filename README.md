@@ -33,7 +33,7 @@ Needs Claude Code 2.1.286 or later (function-hook plugins, an early-access API).
 - This conversation: average hit rate, requests, breaks, extensions, peak context.
 - A per-request chart: stacked bars for cache read / write / miss, with writes (what costs) in orange, the hit-rate line, and red dots on breaks.
 - The list of cache breaks with their likely causes, and the extensions made; one line when there are none.
-- Quick settings for what happens near expiry, the TTL mode (with how it was detected) and the band.
+- Quick settings for what happens near expiry, the TTL mode (with how it was detected), the band and the language.
 
 **Terminal and VS Code**: one status line.
 
@@ -47,6 +47,7 @@ Needs Claude Code 2.1.286 or later (function-hook plugins, an early-access API).
 | Command | What it does |
 |---|---|
 | `/cache` | Opens the side panel |
+| `/cache lang [en\|zh-TW]` | Switches the language on the spot; with no language, to the other one |
 | `/cache-extend` | Keeps the cache warm now |
 
 ## Keeping the cache warm
@@ -77,7 +78,7 @@ Likely causes: idle past the TTL, a model switch, a compaction, a change to the 
 
 ## Settings
 
-Each one is a row in `/config`. The side panel's quick settings change `onExpiring`, `ttlMode` and `band` too.
+Each one is a row in `/config`. The side panel's quick settings change `onExpiring`, `ttlMode`, `band` and `language` too, and so does `/cache lang`.
 
 | Setting | Values | Default | |
 |---|---|---|---|

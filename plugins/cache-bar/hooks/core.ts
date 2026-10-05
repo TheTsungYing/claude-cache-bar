@@ -49,6 +49,8 @@ export type Config = {
   breakSensitivity: BreakSensitivity
 }
 
+export const LANGUAGES: readonly Language[] = ['en', 'zh-TW']
+
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
   allowed.find(item => item === value) ?? fallback
 
@@ -57,7 +59,7 @@ const clamp = (value: unknown, fallback: number, min: number, max: number) =>
 
 /** Reads `register`'s options, falling back to the defaults on anything odd. */
 export const readConfig = (options: Readonly<Record<string, unknown>>): Config => ({
-  language: pick(options.language, ['en', 'zh-TW'], 'en'),
+  language: pick(options.language, LANGUAGES, 'en'),
   ttlMode: pick(options.ttlMode, ['auto', '5m', '1h'], 'auto'),
   onExpiring: pick(options.onExpiring, ['notify', 'button', 'auto'], 'button'),
   band: pick(options.band, ['compact', 'off'], 'compact'),
@@ -72,7 +74,7 @@ export const readConfig = (options: Readonly<Record<string, unknown>>): Config =
 
 // ---- Settings picked in the panel
 
-export const NO_OVERRIDES: Overrides = { onExpiring: null, ttlMode: null, band: null }
+export const NO_OVERRIDES: Overrides = { onExpiring: null, ttlMode: null, band: null, language: null }
 
 const ON_EXPIRING: readonly OnExpiring[] = ['notify', 'button', 'auto']
 const TTL_MODES: readonly TtlMode[] = ['auto', '5m', '1h']
@@ -88,7 +90,8 @@ const isOverride = <T extends string>(value: unknown, allowed: readonly T[]) =>
 
 /**
  * A `$.store` value as Overrides, or null when it is malformed. A field saved
- * before it existed (`band`) reads as no override, so an upgrade keeps the rest.
+ * before it existed (`band`, `language`) reads as no override, so an upgrade
+ * keeps the rest.
  */
 export const normalizeOverrides = (value: unknown): Overrides | null => {
   if (typeof value !== 'object' || value === null || !('onExpiring' in value) || !('ttlMode' in value)) {
@@ -96,8 +99,14 @@ export const normalizeOverrides = (value: unknown): Overrides | null => {
   }
 
   const band = 'band' in value ? value.band : null
+  const language = 'language' in value ? value.language : null
 
-  if (!isOverride(value.onExpiring, ON_EXPIRING) || !isOverride(value.ttlMode, TTL_MODES) || !isOverride(band, BAND_MODES)) {
+  if (
+    !isOverride(value.onExpiring, ON_EXPIRING) ||
+    !isOverride(value.ttlMode, TTL_MODES) ||
+    !isOverride(band, BAND_MODES) ||
+    !isOverride(language, LANGUAGES)
+  ) {
     return null
   }
 
@@ -105,6 +114,7 @@ export const normalizeOverrides = (value: unknown): Overrides | null => {
     onExpiring: value.onExpiring as Overrides['onExpiring'],
     ttlMode: value.ttlMode as Overrides['ttlMode'],
     band: band as Overrides['band'],
+    language: language as Overrides['language'],
   }
 }
 
@@ -114,6 +124,7 @@ export const applyOverrides = (base: Config, o: Overrides): Config => ({
   onExpiring: o.onExpiring !== null && o.onExpiring.over === base.onExpiring ? o.onExpiring.value : base.onExpiring,
   ttlMode: o.ttlMode !== null && o.ttlMode.over === base.ttlMode ? o.ttlMode.value : base.ttlMode,
   band: o.band !== null && o.band.over === base.band ? o.band.value : base.band,
+  language: o.language !== null && o.language.over === base.language ? o.language.value : base.language,
 })
 
 export type QuickSetting = keyof Overrides
@@ -132,9 +143,51 @@ export const withOverride = (o: Overrides, base: Config, field: QuickSetting, va
     return { ...o, band: picked === base.band ? null : { value: picked, over: base.band } }
   }
 
+  if (field === 'language') {
+    const picked = pick(value, LANGUAGES, base.language)
+
+    return { ...o, language: picked === base.language ? null : { value: picked, over: base.language } }
+  }
+
   const picked = pick(value, TTL_MODES, base.ttlMode)
 
   return { ...o, ttlMode: picked === base.ttlMode ? null : { value: picked, over: base.ttlMode } }
+}
+
+// ---- /cache arguments
+
+/** What `/cache` was asked: open the panel, switch the language, or neither. */
+export type CacheCommand = { kind: 'open' } | { kind: 'language'; language: Language } | { kind: 'unknown' }
+
+const LANGUAGE_ALIASES: Partial<Record<string, Language>> = {
+  en: 'en',
+  english: 'en',
+  zh: 'zh-TW',
+  'zh-tw': 'zh-TW',
+  tw: 'zh-TW',
+  中文: 'zh-TW',
+  繁中: 'zh-TW',
+}
+
+/** Reads `/cache`'s arguments: nothing opens the panel; `lang` alone switches to the other language. */
+export const parseCacheArgs = (args: string, current: Language): CacheCommand => {
+  const [verb, value, ...rest] = args.trim().toLowerCase().split(/\s+/).filter(word => word !== '')
+
+  if (verb === undefined) {
+    return { kind: 'open' }
+  }
+
+  if ((verb !== 'lang' && verb !== 'language') || rest.length > 0) {
+    return { kind: 'unknown' }
+  }
+
+  if (value === undefined) {
+    return { kind: 'language', language: current === 'en' ? 'zh-TW' : 'en' }
+  }
+
+  const language = LANGUAGE_ALIASES[value]
+
+  return language === undefined ? { kind: 'unknown' } : { kind: 'language', language }
 }
 
 // ---- Samples

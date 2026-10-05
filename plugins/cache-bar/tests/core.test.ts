@@ -12,6 +12,7 @@ import {
   isBreak,
   learnTtl,
   normalizeOverrides,
+  parseCacheArgs,
   notePrint,
   readConfig,
   shouldAutoExtend,
@@ -349,16 +350,59 @@ describe('settings', () => {
     expect(withOverride(off, DEFAULTS, 'band', 'compact')).toEqual(NO_OVERRIDES)
   })
 
-  test('picks saved before the band setting existed are kept', () => {
+  test('the language can be switched and switched back', () => {
+    const zh = withOverride(NO_OVERRIDES, DEFAULTS, 'language', 'zh-TW')
+
+    expect(applyOverrides(DEFAULTS, zh).language).toBe('zh-TW')
+    expect(applyOverrides({ ...DEFAULTS, language: 'zh-TW' }, zh).language).toBe('zh-TW')
+    expect(withOverride(zh, DEFAULTS, 'language', 'en')).toEqual(NO_OVERRIDES)
+    expect(withOverride(NO_OVERRIDES, DEFAULTS, 'language', 'fr')).toEqual(NO_OVERRIDES)
+  })
+
+  test('picks saved before the band and language settings existed are kept', () => {
     const saved = { onExpiring: { value: 'auto', over: 'button' }, ttlMode: null }
 
-    expect(normalizeOverrides(saved)).toEqual({ ...saved, band: null })
+    expect(normalizeOverrides(saved)).toEqual({ ...saved, band: null, language: null })
+    expect(normalizeOverrides({ ...saved, band: null })).toEqual({ ...saved, band: null, language: null })
+  })
+
+  test('picks held in an older shape apply without the newer fields', () => {
+    const old = normalizeOverrides({ onExpiring: null, ttlMode: null, band: { value: 'off', over: 'compact' } })
+
+    expect(old).not.toBe(null)
+    expect(applyOverrides(DEFAULTS, old ?? NO_OVERRIDES)).toEqual({ ...DEFAULTS, band: 'off' })
   })
 
   test('a malformed saved pick reads as none', () => {
     expect(normalizeOverrides(null)).toBe(null)
     expect(normalizeOverrides({ onExpiring: null })).toBe(null)
     expect(normalizeOverrides({ onExpiring: null, ttlMode: null, band: { value: 'big', over: 'compact' } })).toBe(null)
+    expect(normalizeOverrides({ ...NO_OVERRIDES, language: { value: 'fr', over: 'en' } })).toBe(null)
+  })
+})
+
+describe('/cache arguments', () => {
+  test('nothing opens the panel', () => {
+    expect(parseCacheArgs('', 'en')).toEqual({ kind: 'open' })
+    expect(parseCacheArgs('   ', 'en')).toEqual({ kind: 'open' })
+  })
+
+  test('lang names a language by code or by name', () => {
+    expect(parseCacheArgs('lang zh-TW', 'en')).toEqual({ kind: 'language', language: 'zh-TW' })
+    expect(parseCacheArgs(' LANG  zh ', 'en')).toEqual({ kind: 'language', language: 'zh-TW' })
+    expect(parseCacheArgs('language 中文', 'en')).toEqual({ kind: 'language', language: 'zh-TW' })
+    expect(parseCacheArgs('lang English', 'zh-TW')).toEqual({ kind: 'language', language: 'en' })
+  })
+
+  test('lang alone switches to the other language', () => {
+    expect(parseCacheArgs('lang', 'en')).toEqual({ kind: 'language', language: 'zh-TW' })
+    expect(parseCacheArgs('lang', 'zh-TW')).toEqual({ kind: 'language', language: 'en' })
+  })
+
+  test('anything else is unknown', () => {
+    expect(parseCacheArgs('lang fr', 'en')).toEqual({ kind: 'unknown' })
+    expect(parseCacheArgs('lang en now', 'en')).toEqual({ kind: 'unknown' })
+    expect(parseCacheArgs('extend', 'en')).toEqual({ kind: 'unknown' })
   })
 })
 

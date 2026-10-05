@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
-import type { CacheBreak, CacheSample, Extension } from '../types'
+import type { CacheBreak, CacheSample, Extension, Overrides } from '../types'
 import {
   EMPTY_TTL,
   EXTEND_COMMAND,
   KEEP_WARM_PROMPT,
+  LANGUAGES,
   MAX_EVENTS,
   MAX_SAMPLES,
   NO_OVERRIDES,
@@ -28,6 +29,7 @@ import {
   learnTtl,
   normalizeOverrides,
   notePrint,
+  parseCacheArgs,
   readConfig,
   recentHits,
   shouldAutoExtend,
@@ -38,7 +40,7 @@ import {
   withOverride,
 } from './core'
 import type { QuickSetting } from './core'
-import { STRINGS } from './i18n'
+import { LANGUAGE_NAMES, STRINGS } from './i18n'
 import {
   BIG_CLOCK_SIZE,
   BIG_RING_SIZE,
@@ -95,7 +97,12 @@ export const register: Register = (on, options) => {
   // The userConfig values, and those in force once the panel's picks apply.
   const base = readConfig(options)
   let config = base
-  const strings = STRINGS[config.language]
+  let strings = STRINGS[config.language]
+  // `$.state` outlives a reload, so it may hold picks saved in an older shape.
+  const applyPicks = (picked: Overrides) => {
+    config = applyOverrides(base, normalizeOverrides(picked) ?? NO_OVERRIDES)
+    strings = STRINGS[config.language]
+  }
   let shownStatus: string | undefined
   // Once the desktop band draws, the status line would only repeat it.
   let hasBand = false
@@ -106,6 +113,9 @@ export const register: Register = (on, options) => {
   // The buttons call it too, since a Button can't reach this plugin's own
   // slash command.
   let extendNow: ((trigger: Extension['trigger'], shouldToast?: boolean) => Promise<string | null>) | null = null
+  // Set by session.start: applies a setting picked in the panel or with
+  // `/cache lang`, resolving to why it failed, or null once it is done.
+  let pickOption: ((field: QuickSetting, value: string) => Promise<string | null>) | null = null
   // The ring's drawing stays the same while its anchor, TTL and phase do, so
   // its SMIL countdown keeps running across the band's redraws.
   let ring = { key: '', source: '' }
@@ -120,8 +130,6 @@ export const register: Register = (on, options) => {
   }
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: COMMAND, description: strings.commandDescription })
-    await $.command.register({ name: EXTEND_COMMAND, description: strings.extendCommandDescription })
     const stored = await $.store.get(TTL_STORE_KEY)
 
     if (isTtlState(stored)) {
@@ -134,7 +142,16 @@ export const register: Register = (on, options) => {
       await update($, overrides, () => storedOverrides)
     }
 
-    config = applyOverrides(base, await read($, overrides))
+    applyPicks(await read($, overrides))
+    await $.command.register({ name: COMMAND, description: strings.commandDescription })
+    await $.command.register({ name: EXTEND_COMMAND, description: strings.extendCommandDescription })
+
+    // A reload after a language change keeps the panel up under its old title.
+    const shownPane = (await $.ui.panes()).find(pane => pane.id === PANE)
+
+    if (shownPane !== undefined && shownPane.title !== strings.paneTitle) {
+      await $.ui.open({ id: PANE, title: strings.paneTitle })
+    }
 
     extendNow = async (trigger, shouldToast = true) => {
       if (isForking) {
@@ -176,6 +193,48 @@ export const register: Register = (on, options) => {
       } finally {
         isForking = false
         await update($, extending, () => false)
+      }
+    }
+
+    // Through `/config` where it has the row: the module reloads with the new
+    // options. A plugin folder on desktop gets no rows, so the pick is kept as
+    // an override instead, in `$.state` (redrawing) and `$.store`.
+    pickOption = async (field, value) => {
+      if (value === config[field]) {
+        return null
+      }
+
+      try {
+        const rows = await $.config.list()
+        const row =
+          rows.find(r => r.key === `cache-bar.${field}`) ??
+          rows.find(r => r.key.startsWith('cache-bar') && r.key.endsWith(`.${field}`))
+
+        if (row === undefined) {
+          await update($, overrides, o => withOverride(normalizeOverrides(o) ?? NO_OVERRIDES, base, field, value))
+          const picked = await read($, overrides)
+          applyPicks(picked)
+          await $.store.set(OVERRIDES_STORE_KEY, picked)
+
+          if (field === 'language' && (await $.ui.panes()).some(pane => pane.id === PANE)) {
+            await $.ui.open({ id: PANE, title: strings.paneTitle })
+          }
+        } else {
+          const result = await $.config.set({ key: row.key, value })
+
+          if (result.deny !== undefined) {
+            return strings.settingFailed(result.deny)
+          }
+        }
+
+        // Once the panel closes, nothing on screen leads back: say how.
+        if (field === 'band' && value === 'off') {
+          $.ui.toast(strings.bandTurnedOff(COMMAND))
+        }
+
+        return null
+      } catch (err) {
+        return strings.settingFailed(String(err))
       }
     }
 
@@ -244,7 +303,21 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('command.run', { command: COMMAND }, async $ => {
+  // `/cache` opens the panel; `/cache lang [en|zh-TW]` switches the language,
+  // to the other one when none is named.
+  on('command.run', { command: COMMAND }, async ($, e) => {
+    const asked = parseCacheArgs(e.args, config.language)
+
+    if (asked.kind === 'unknown') {
+      return { text: strings.cacheUsage(COMMAND) }
+    }
+
+    if (asked.kind === 'language') {
+      const failed = await pickOption?.('language', asked.language)
+
+      return { text: failed ?? STRINGS[asked.language].languageSet(LANGUAGE_NAMES[asked.language]) }
+    }
+
     forgetPaneDrawings()
     const opened = await $.ui.open({ id: PANE, title: strings.paneTitle })
 
@@ -408,7 +481,7 @@ export const register: Register = (on, options) => {
     // by SMIL, and a per-second redraw of the band resets an open Select's
     // highlight in the panel too.
     await read($, stage)
-    config = applyOverrides(base, await read($, overrides))
+    applyPicks(await read($, overrides))
 
     if (config.band === 'off') {
       return next(e)
@@ -545,11 +618,11 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button } = ui
     const Svg = 'Svg' in ui ? ui.Svg : null
     const Select = 'Select' in ui ? ui.Select : null
-    const s = strings
     // Redraw on the stage, not every second: the ring and clock count down by
     // SMIL. Without Svg (the terminal) the clock is text, so it reads `now`.
     await read($, stage)
-    config = applyOverrides(base, await read($, overrides))
+    applyPicks(await read($, overrides))
+    const s = strings
 
     if (Svg === null) {
       await read($, clock)
@@ -564,41 +637,11 @@ export const register: Register = (on, options) => {
     const last = list.at(-1)
     const countdown = countdownOf(list, extensionList, config.ttlMode, learned, config, now)
 
-    // Through `/config` where it has the row: the module reloads with the new
-    // options. A plugin folder on desktop gets no rows, so the pick is kept as
-    // an override instead, in `$.state` (redrawing) and `$.store`.
     const setOption = async (field: QuickSetting, value: string) => {
-      if (value === config[field]) {
-        return
-      }
+      const failed = await pickOption?.(field, value)
 
-      try {
-        const rows = await $.config.list()
-        const row =
-          rows.find(r => r.key === `cache-bar.${field}`) ??
-          rows.find(r => r.key.startsWith('cache-bar') && r.key.endsWith(`.${field}`))
-
-        if (row === undefined) {
-          await update($, overrides, o => withOverride(o, base, field, value))
-          const picked = await read($, overrides)
-          config = applyOverrides(base, picked)
-          await $.store.set(OVERRIDES_STORE_KEY, picked)
-        } else {
-          const result = await $.config.set({ key: row.key, value })
-
-          if (result.deny !== undefined) {
-            $.ui.toast(s.settingFailed(result.deny))
-
-            return
-          }
-        }
-
-        // Once the panel closes, nothing on screen leads back: say how.
-        if (field === 'band' && value === 'off') {
-          $.ui.toast(s.bandTurnedOff(COMMAND))
-        }
-      } catch (err) {
-        $.ui.toast(s.settingFailed(String(err)))
+      if (failed !== null && failed !== undefined) {
+        $.ui.toast(failed)
       }
     }
 
@@ -623,7 +666,8 @@ export const register: Register = (on, options) => {
         {Select === null ? (
           <Text dimColor>
             {s.onExpiringLabel}: {s.onExpiringOptions[config.onExpiring]} · {s.ttlModeLabel}:{' '}
-            {s.ttlModeOptions[config.ttlMode]} · {s.bandLabel}: {s.bandOptions[config.band]}
+            {s.ttlModeOptions[config.ttlMode]} · {s.bandLabel}: {s.bandOptions[config.band]} · {s.languageLabel}:{' '}
+            {LANGUAGE_NAMES[config.language]}
             {ttlNote === null ? '' : `\n${ttlNote}`}
           </Text>
         ) : (
@@ -654,6 +698,15 @@ export const register: Register = (on, options) => {
                 value={config.band}
                 options={(['compact', 'off'] as const).map(v => ({ value: v, label: s.bandOptions[v] }))}
                 onSelect={value => void setOption('band', value)}
+              />
+            </Box>
+            <Box flexDirection="column">
+              <Text dimColor>{s.languageLabel}</Text>
+              <Select
+                key="language"
+                value={config.language}
+                options={LANGUAGES.map(v => ({ value: v, label: LANGUAGE_NAMES[v] }))}
+                onSelect={value => void setOption('language', value)}
               />
             </Box>
           </Box>
