@@ -19,6 +19,8 @@ Needs Claude Code 2.1.286 or later (function-hook plugins, an early-access API).
 
 **Desktop (Code tab)**: a compact, one-row band above the prompt. It stays quiet while the cache is fine and adds color only when something needs you.
 
+![The band above the prompt, hovered: countdown ring and clock, Details, hit rate, context and a hit-rate trend line](docs/images/band-en.png)
+
 - A small countdown ring and clock for the cache TTL. Grey while fresh, orange at 20% left, red at 10%, a dashed grey ring once expired. Nothing blinks.
 - Hover over the band for the last request's hit rate, the context size and a hit-rate trend line (and, once expired, what the next request will rewrite).
 - While Claude is answering, the ring holds still and the clock shows `…`: each request refreshes the cache.
@@ -28,6 +30,10 @@ Needs Claude Code 2.1.286 or later (function-hook plugins, an early-access API).
 - Don't want the band at all? Set **Band above the prompt** to **Off** in the side panel; the toasts still warn you, and `/cache` opens the panel to turn it back on.
 
 **Side panel** (`/cache` or **Details**):
+
+<img src="docs/images/panel-en.png" alt="The side panel: countdown, this conversation's totals, the per-request chart hovered on a break, cache breaks, extensions and settings" width="495">
+
+<sub>Sample data, with the pointer on the request that broke the cache.</sub>
 
 - The countdown, with the TTL, last hit rate and context on one line.
 - This conversation: average hit rate, requests, breaks, extensions, peak context.
