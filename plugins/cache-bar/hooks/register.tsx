@@ -594,6 +594,13 @@ export const register: Register = (on, options) => {
       }
     }
 
+    // How the TTL was settled; it explains the TTL setting, so it sits there.
+    const ttlNote =
+      config.ttlMode !== 'auto'
+        ? null
+        : learned.detected === '1h' && learned.idleMs !== null
+          ? s.ttlLearned('1h', Math.floor(learned.idleMs / 60_000))
+          : s.ttlAssumed
     const title = (text: string) => <Text bold>{text}</Text>
     const stat = (label: string, value: string) => (
       <Text>
@@ -609,6 +616,7 @@ export const register: Register = (on, options) => {
           <Text dimColor>
             {s.onExpiringLabel}: {s.onExpiringOptions[config.onExpiring]} · {s.ttlModeLabel}:{' '}
             {s.ttlModeOptions[config.ttlMode]} · {s.bandLabel}: {s.bandOptions[config.band]}
+            {ttlNote === null ? '' : `\n${ttlNote}`}
           </Text>
         ) : (
           <Box flexDirection="column" gap={1}>
@@ -629,6 +637,7 @@ export const register: Register = (on, options) => {
                 options={(['auto', '5m', '1h'] as const).map(v => ({ value: v, label: s.ttlModeOptions[v] }))}
                 onSelect={value => void setOption('ttlMode', value)}
               />
+              {ttlNote === null ? null : <Text dimColor>{ttlNote}</Text>}
             </Box>
             <Box flexDirection="column">
               <Text dimColor>{s.bandLabel}</Text>
@@ -679,12 +688,6 @@ export const register: Register = (on, options) => {
     }
 
     const canExtend = !isWorking && countdown.phase === 'alert' && config.onExpiring !== 'notify'
-    const ttlNote =
-      config.ttlMode !== 'auto'
-        ? null
-        : learned.detected === '1h' && learned.idleMs !== null
-          ? s.ttlLearned('1h', Math.floor(learned.idleMs / 60_000))
-          : s.ttlAssumed
     const summary = summarize(list, breakList, extensionList)
     const shown = list.slice(-CHART_BARS)
     const peakInput = Math.max(...shown.map(x => x.read + x.written + x.uncached))
@@ -728,10 +731,9 @@ export const register: Register = (on, options) => {
                 height={bigClock.height}
               />
             )}
-            {stat('TTL', s.ttl(config.ttlMode, countdown.ttl))}
-            {ttlNote === null ? null : <Text dimColor>{ttlNote}</Text>}
-            <Text>
-              {stat(s.lastHit, formatPercent(hitRateOf(last)))} · {stat(s.context, context)}
+            <Text dimColor>
+              TTL {s.ttl(config.ttlMode, countdown.ttl)} · {s.lastHit} {formatPercent(hitRateOf(last))} · {s.context}{' '}
+              {context}
             </Text>
           </Box>
           {isExtending ? (
@@ -767,55 +769,63 @@ export const register: Register = (on, options) => {
               height={CHART_HEIGHT}
             />
             <Box flexDirection="row" gap={2} flexWrap="wrap">
-              {swatch(COLORS.read, '■', s.legend.read)}
+              {/* Opaque swatches: the bars' see-through greys vanish as text. */}
+              {swatch(COLORS.neutral, '■', s.legend.read)}
               {swatch(COLORS.written, '■', s.legend.written)}
-              {swatch(COLORS.uncached, '■', s.legend.uncached)}
+              {swatch(COLORS.neutral, '□', s.legend.uncached)}
               {swatch(COLORS.rate, '━', s.legend.rate)}
               {swatch(COLORS.alert, '●', s.legend.broke)}
             </Box>
           </Box>
         )}
 
-        <Box flexDirection="column">
-          {title(s.breaksTitle)}
-          {breakList.length === 0 ? <Text dimColor>{s.noBreaks}</Text> : null}
-          {breakList
-            .slice(-LIST_ROWS)
-            .reverse()
-            .map(b => (
-              <Box flexDirection="column">
-                <Text>
-                  <Text color={TEXT_ALERT}>● </Text>
-                  {s.breakLine(
-                    numberOf(b.at),
-                    formatPercent(b.previousHitRate),
-                    formatPercent(b.hitRate),
-                    formatTokens(b.rewritten),
-                  )}
-                </Text>
-                <Text dimColor>  {formatCauses(b.causes, s)}</Text>
-              </Box>
-            ))}
-        </Box>
+        {/* Nothing to list: one line says so, rather than two empty sections. */}
+        {breakList.length === 0 && extensionList.length === 0 ? (
+          <Text dimColor>{s.quietHistory}</Text>
+        ) : (
+          <Box flexDirection="column" gap={1}>
+            <Box flexDirection="column">
+              {title(s.breaksTitle)}
+              {breakList.length === 0 ? <Text dimColor>{s.noBreaks}</Text> : null}
+              {breakList
+                .slice(-LIST_ROWS)
+                .reverse()
+                .map(b => (
+                  <Box flexDirection="column">
+                    <Text>
+                      <Text color={TEXT_ALERT}>● </Text>
+                      {s.breakLine(
+                        numberOf(b.at),
+                        formatPercent(b.previousHitRate),
+                        formatPercent(b.hitRate),
+                        formatTokens(b.rewritten),
+                      )}
+                    </Text>
+                    <Text dimColor>  {formatCauses(b.causes, s)}</Text>
+                  </Box>
+                ))}
+            </Box>
 
-        <Box flexDirection="column">
-          {title(s.extensionsTitle)}
-          {extensionList.length === 0 ? <Text dimColor>{s.noExtensions}</Text> : null}
-          {extensionList
-            .slice(-LIST_ROWS)
-            .reverse()
-            .map(x => (
-              <Text>
-                <Text dimColor>{s.idleAt(formatClock(x.at - (idleSince(x.at) ?? x.at)))} · </Text>
-                {s.trigger[x.trigger]} ·{' '}
-                {x.isAnswered ? (
-                  s.extensionRead(formatTokens(x.read))
-                ) : (
-                  <Text color={TEXT_ALERT}>{s.extensionFailed(x.reason ?? '')}</Text>
-                )}
-              </Text>
-            ))}
-        </Box>
+            <Box flexDirection="column">
+              {title(s.extensionsTitle)}
+              {extensionList.length === 0 ? <Text dimColor>{s.noExtensions}</Text> : null}
+              {extensionList
+                .slice(-LIST_ROWS)
+                .reverse()
+                .map(x => (
+                  <Text>
+                    <Text dimColor>{s.idleAt(formatClock(x.at - (idleSince(x.at) ?? x.at)))} · </Text>
+                    {s.trigger[x.trigger]} ·{' '}
+                    {x.isAnswered ? (
+                      s.extensionRead(formatTokens(x.read))
+                    ) : (
+                      <Text color={TEXT_ALERT}>{s.extensionFailed(x.reason ?? '')}</Text>
+                    )}
+                  </Text>
+                ))}
+            </Box>
+          </Box>
+        )}
 
         {settings}
       </Box>

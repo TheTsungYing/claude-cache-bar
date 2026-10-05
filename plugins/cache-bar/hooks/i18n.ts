@@ -57,6 +57,8 @@ export type Strings = {
   breakLine: (n: number | null, before: string, after: string, k: string) => string
   extensionsTitle: string
   noExtensions: string
+  /** Neither a break nor an extension yet. */
+  quietHistory: string
   trigger: { manual: string; auto: string }
   extensionRead: (k: string) => string
   extensionFailed: (reason: string) => string
@@ -128,6 +130,7 @@ export const STRINGS: Record<Language, Strings> = {
     breakLine: (n, before, after, k) => `${n === null ? '' : `request #${n} · `}${before} → ${after} · rewrote ${k}`,
     extensionsTitle: 'Extensions',
     noExtensions: 'none',
+    quietHistory: 'No breaks · no extensions',
     trigger: { manual: 'manual', auto: 'auto' },
     extensionRead: k => `read ${k}`,
     extensionFailed: reason => `failed: ${reason}`,
@@ -194,6 +197,7 @@ export const STRINGS: Record<Language, Strings> = {
     breakLine: (n, before, after, k) => `${n === null ? '' : `第 ${n} 次請求 · `}${before} → ${after} · 重寫 ${k}`,
     extensionsTitle: '延長紀錄',
     noExtensions: '無',
+    quietHistory: '無斷掉 · 無延長',
     trigger: { manual: '手動', auto: '自動' },
     extensionRead: k => `讀取 ${k}`,
     extensionFailed: reason => `失敗：${reason}`,

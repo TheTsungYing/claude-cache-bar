@@ -12,11 +12,13 @@ export const COLORS = {
   alert: '#E24B4A',
   expired: '#8F8B83',
   track: '#8F8B8340',
-  read: '#1D9E75',
-  written: '#EF9F27',
-  uncached: '#888780',
-  rate: '#378ADD',
-  label: '#888780',
+  // The chart: reads are the cheap, normal case, so they stay grey; writes
+  // cost, so they take the accent.
+  read: '#8F8B8380',
+  written: '#D97757',
+  uncached: '#8F8B8333',
+  rate: '#8F8B83',
+  label: '#8F8B83',
 } as const
 
 /** One line of text high, so the band stays one row. */
@@ -146,7 +148,7 @@ export const chartSvg = (bars: readonly ChartBar[], maxLabel: string) => {
   const right = CHART_WIDTH - 2
   const plot = bottom - top
   const slot = (right - left) / Math.max(bars.length, 12)
-  const barWidth = Math.max(1, slot * 0.7)
+  const barWidth = Math.max(1, slot * 0.5)
   const max = Math.max(1, ...bars.map(b => b.read + b.written + b.uncached))
   const y = (tokens: number) => (tokens / max) * plot
 
@@ -189,7 +191,7 @@ export const chartSvg = (bars: readonly ChartBar[], maxLabel: string) => {
 
 /** Font sizes of the band's clock and the panel's. */
 export const CLOCK_SIZE = 14
-export const BIG_CLOCK_SIZE = 18
+export const BIG_CLOCK_SIZE = 22
 
 const CLOCK_FONT = 'ui-monospace, Menlo, Consolas, monospace'
 
